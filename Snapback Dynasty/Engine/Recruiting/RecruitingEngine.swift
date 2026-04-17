@@ -1,0 +1,357 @@
+import Foundation
+import SwiftData
+
+/// Core weekly recruiting loop: actions, interest, phases, commits, AI.
+///
+/// EA's exact interest-point values aren't published. These numbers are
+/// internally-consistent and map cleanly onto the arrow scale users see.
+enum RecruitingResult {
+    case ok(delta: Double, message: String)
+    case insufficientHours
+    case gated(String)
+    case dealbreakerBlocked
+}
+
+final class RecruitingEngine {
+    let context: ModelContext
+
+    init(context: ModelContext) { self.context = context }
+
+    // MARK: - Board management
+
+    static let boardCap = 35
+    static let perRecruitWeeklyCap = 50  // raised to 70 by "On The Trail"
+
+    /// Returns true if a team already has the recruit on its board.
+    static func isOnBoard(team: Team, recruit: Recruit) -> Bool {
+        team.recruitInterests.contains { $0.recruit === recruit }
+    }
+
+    /// Current count of this team's board.
+    static func boardCount(team: Team) -> Int {
+        team.recruitInterests.count
+    }
+
+    @discardableResult
+    func addToBoard(team: Team, recruit: Recruit) -> Bool {
+        guard Self.boardCount(team: team) < Self.boardCap else { return false }
+        guard !Self.isOnBoard(team: team, recruit: recruit) else { return false }
+        let interest = RecruitInterest(recruit: recruit, team: team)
+        context.insert(interest)
+        return true
+    }
+
+    func removeFromBoard(team: Team, recruit: Recruit) {
+        if let interest = team.recruitInterests.first(where: { $0.recruit === recruit }) {
+            context.delete(interest)
+        }
+    }
+
+    // MARK: - Hour budget
+
+    /// Weekly hour allotment based on legacy (rating).
+    /// Table from CFB 25 community-documented numbers.
+    static func weeklyHours(for team: Team) -> Int {
+        let legacy = team.legacy
+        // Map legacy 25–99 onto 350–1000 hour range in steps.
+        let bands: [(legacyFloor: Int, hours: Int)] = [
+            (95, 1000), (90, 900), (85, 800), (80, 750),
+            (75, 700),  (70, 650), (65, 600), (60, 550),
+            (55, 500),  (50, 450), (40, 400), (0, 350),
+        ]
+        for band in bands where legacy >= band.legacyFloor { return band.hours }
+        return 350
+    }
+
+    /// Apply recruiting staff bonus.
+    static func weeklyHours(for team: Team, staff: CoachingStaff?) -> Int {
+        var hours = weeklyHours(for: team)
+        if let staff {
+            let bonus = Double(staff.recruitingBonus) * 0.02
+            hours = Int(Double(hours) * (1.0 + bonus))
+        }
+        return hours
+    }
+
+    // MARK: - Scouting
+
+    /// Advance the recruit's scouting tier (0 → 4). Each Scout action = one tier.
+    private func applyScouting(_ recruit: Recruit) {
+        recruit.scoutingTier = min(4, recruit.scoutingTier + 1)
+    }
+
+    // MARK: - Perform action
+
+    /// User-initiated action.
+    @discardableResult
+    func perform(action: RecruitingAction, team: Team, recruit: Recruit,
+                 season: Season) -> RecruitingResult {
+        // Ensure recruit is on board.
+        if !Self.isOnBoard(team: team, recruit: recruit) {
+            _ = addToBoard(team: team, recruit: recruit)
+        }
+        guard let interest = team.recruitInterests.first(where: { $0.recruit === recruit })
+        else { return .gated("Not on board") }
+
+        // Check dealbreaker gate (only blocks if revealed).
+        if recruit.revealsDealbreaker {
+            let threshold = LetterGrade(rawValue: recruit.dealbreakerThreshold) ?? .C
+            let teamGrade = team.grade(for: recruit.dealbreaker)
+            if teamGrade < threshold && !hasFlexStandards(team: team) {
+                return .dealbreakerBlocked
+            }
+        }
+
+        // Phase gate on Top-5 actions.
+        if action.requiresTop5 {
+            if interest.topSlot.rawValue == 0 || interest.topSlot.rawValue > 5 {
+                return .gated("Need to be in Top 5")
+            }
+        }
+
+        // Hour budget.
+        let cost = action.hourCost
+        if season.recruitingHoursRemaining < cost {
+            return .insufficientHours
+        }
+
+        // Per-recruit weekly cap.
+        let perRecruitCap = hasOnTheTrail(team: team) ? 70 : Self.perRecruitWeeklyCap
+        // Visits are EXEMPT from the per-recruit cap (EA behavior).
+        if action != .scheduleVisit && interest.hoursThisWeek + cost > perRecruitCap {
+            return .gated("Per-recruit cap reached")
+        }
+
+        // Deduct hours.
+        season.recruitingHoursRemaining -= cost
+        if action != .scheduleVisit { interest.hoursThisWeek += cost }
+        interest.hoursInvested += cost
+
+        // Compute interest delta.
+        let delta = computeDelta(action: action, team: team, recruit: recruit, interest: interest)
+        interest.interestLevel = max(0, min(100, interest.interestLevel + delta))
+
+        // Side effects.
+        switch action {
+        case .scout:
+            applyScouting(recruit)
+        case .offer:
+            interest.hasOffered = true
+        case .scheduleVisit:
+            interest.visitWeek = season.currentWeek
+        default: break
+        }
+
+        let msg = delta >= 0 ? "+\(String(format: "%.1f", delta)) interest" :
+                                "\(String(format: "%.1f", delta)) interest"
+        return .ok(delta: delta, message: msg)
+    }
+
+    // MARK: - Interest formula
+
+    /// Rule of 19: sum the 3 motivation grades (numeric 1–13). ≥19 → Full Pitch is +EV.
+    static func motivationFitScore(team: Team, recruit: Recruit) -> Int {
+        recruit.motivations.reduce(0) { $0 + team.grade(for: $1).rawValue }
+    }
+
+    private func computeDelta(action: RecruitingAction, team: Team, recruit: Recruit,
+                              interest: RecruitInterest) -> Double {
+        let base: Double = {
+            switch action {
+            case .scout:         return 0
+            case .searchSocial:  return 1
+            case .dm:            return 2
+            case .contactFamily: return 4
+            case .allIn:         return 7
+            case .offer:         return 5
+            case .scheduleVisit: return 10
+            case .nudge:         return 3
+            case .fullPitch:     return 8
+            case .reframe:       return 2
+            }
+        }()
+
+        // Pipeline multiplier (team's tier in recruit's region).
+        let pipelineMult = team.tier(for: recruit.pipeline).interestMultiplier
+
+        // Coaching recruiting bonus.
+        let coachMult = 1.0 + Double(team.coachingStaff?.recruitingBonus ?? 0) * 0.015
+
+        // Motivation alignment: scaled linearly around an average grade of 7 (C+).
+        let fit = Self.motivationFitScore(team: team, recruit: recruit)  // 3–39
+        let fitMult = 0.6 + (Double(fit - 9) / 30.0)  // 0.6 → 1.6
+
+        // Phase multiplier.
+        let phaseMult: Double = {
+            switch recruit.phase {
+            case .discovery: return 0.85
+            case .pitch:     return 1.05
+            case .close:     return 1.25
+            default:         return 0.0
+            }
+        }()
+
+        var delta = base * pipelineMult * coachMult * fitMult * phaseMult
+
+        // Action-specific quirks.
+        switch action {
+        case .fullPitch:
+            // Rule of 19: sum of motivation grades ≥ 19 → bonus; else penalty.
+            if fit >= 19 { delta *= 1.3 }
+            else { delta *= -0.6 }
+        case .nudge:
+            // Nudge is precision: great when a specific motivation grade is strong.
+            let bestMotivationGrade = recruit.motivations
+                .map { team.grade(for: $0).rawValue }
+                .max() ?? 0
+            if bestMotivationGrade < 8 { delta *= 0.3 }  // diminished if no B- or better
+        case .reframe:
+            // 45% chance to succeed, more if Persuasive Charm unlocked.
+            let succeeds = Double.random(in: 0..<1) < (hasPersuasiveCharm(team: team) ? 0.65 : 0.45)
+            if !succeeds { delta = 0 }
+        case .scheduleVisit:
+            // Base +10; actual outcome comes from game-day (Phase E.4 hook).
+            break
+        default: break
+        }
+
+        return delta
+    }
+
+    private func hasOnTheTrail(team: Team) -> Bool {
+        team.coachingStaff?.has(.onTheTrail) ?? false
+    }
+    private func hasPersuasiveCharm(team: Team) -> Bool {
+        team.coachingStaff?.has(.persuasiveCharm) ?? false
+    }
+    private func hasFlexStandards(team: Team) -> Bool {
+        team.coachingStaff?.has(.flexStandards) ?? false
+    }
+    private func hasDestinyPick(team: Team) -> Bool {
+        team.coachingStaff?.has(.destinyPick) ?? false
+    }
+
+    // MARK: - Weekly advance
+
+    /// Call once per game-week to update AI pressure, reset weekly caps,
+    /// advance phases, and trigger commits.
+    func advanceWeek(season: Season, playerTeam: Team?, allTeams: [Team],
+                     allRecruits: [Recruit]) {
+        // 1) Reset weekly hours across all interests.
+        for team in allTeams {
+            for interest in team.recruitInterests {
+                interest.hoursThisWeek = 0
+            }
+        }
+
+        // 2) Reset player's weekly hour pool.
+        if let team = playerTeam {
+            season.recruitingHoursRemaining = Self.weeklyHours(for: team,
+                                                               staff: team.coachingStaff)
+        }
+
+        // 3) AI pressure — non-player teams gain passive interest on
+        //    prospects in their pipeline regions.
+        for recruit in allRecruits where !recruit.isSigned && recruit.isCommittedToTeamId == nil {
+            applyAIPressure(recruit: recruit, allTeams: allTeams, playerTeam: playerTeam)
+        }
+
+        // 4) Recompute top-list slots + phase for each recruit.
+        for recruit in allRecruits where !recruit.isSigned && recruit.isCommittedToTeamId == nil {
+            recomputeSlotsAndPhase(recruit: recruit)
+        }
+
+        // 5) Check commits.
+        for recruit in allRecruits where !recruit.isSigned && recruit.isCommittedToTeamId == nil {
+            checkCommit(recruit: recruit, playerTeam: playerTeam)
+        }
+
+        // 6) Refresh dynamic school grades weekly.
+        for team in allTeams {
+            SchoolGradeEngine.refreshDynamic(for: team, allTeams: allTeams, context: context)
+        }
+    }
+
+    // MARK: - AI pressure
+
+    private func applyAIPressure(recruit: Recruit, allTeams: [Team], playerTeam: Team?) {
+        // Pick 2-4 competing teams based on pipeline + legacy.
+        let candidates = allTeams.filter { $0 !== playerTeam }
+        let scored: [(Team, Double)] = candidates.map { team in
+            let tierMult = team.tier(for: recruit.pipeline).interestMultiplier
+            let legacyScore = Double(team.legacy) / 100.0
+            return (team, tierMult * legacyScore)
+        }.sorted { $0.1 > $1.1 }
+
+        let pickCount = Int.random(in: 2...4)
+        for (team, score) in scored.prefix(pickCount) {
+            // Ensure RecruitInterest exists for AI too (so slots compute).
+            var interest = team.recruitInterests.first { $0.recruit === recruit }
+            if interest == nil {
+                // Only add AI interest if there's a legitimate pitch to make.
+                if score < 0.7 { continue }
+                let newInterest = RecruitInterest(recruit: recruit, team: team)
+                context.insert(newInterest)
+                interest = newInterest
+            }
+            let gain = Double.random(in: 1.2...3.0) * score
+            interest?.interestLevel = min(100, (interest?.interestLevel ?? 0) + gain)
+        }
+    }
+
+    // MARK: - Slot + phase
+
+    private func recomputeSlotsAndPhase(recruit: Recruit) {
+        // Rank teams by interest level.
+        let ranked = recruit.interests
+            .filter { ($0.interestLevel) > 0 }
+            .sorted { $0.interestLevel > $1.interestLevel }
+
+        for (idx, interest) in ranked.enumerated() {
+            let slot: TopListSlot
+            switch idx {
+            case 0:    slot = .leader
+            case 1, 2: slot = .top3
+            case 3, 4: slot = .top5
+            case 5, 6, 7: slot = .top8
+            case 8, 9:  slot = .top10
+            default:    slot = .notOnList
+            }
+            interest.topSlotRaw = slot.rawValue
+        }
+
+        // Phase transitions.
+        let maxInterest = ranked.first?.interestLevel ?? 0
+        let prevPhase = recruit.phase
+        var newPhase = prevPhase
+        if maxInterest >= 60 { newPhase = .close }
+        else if maxInterest >= 30 { newPhase = .pitch }
+        else { newPhase = .discovery }
+        if newPhase != prevPhase { recruit.phaseRaw = newPhase.rawValue }
+    }
+
+    // MARK: - Commit
+
+    private func checkCommit(recruit: Recruit, playerTeam: Team?) {
+        guard recruit.phase == .close else { return }
+        let ranked = recruit.interests.sorted { $0.interestLevel > $1.interestLevel }
+        guard let leader = ranked.first else { return }
+        let second = ranked.count > 1 ? ranked[1].interestLevel : 0
+        let gap = leader.interestLevel - second
+        let leaderTeam = leader.team
+
+        // Destiny Pick buffs instant-commit odds.
+        let baseThreshold: Double = 85
+        let baseGap: Double = 8
+        let hasDP = playerTeam.map { $0 === leaderTeam }.flatMap { $0 ? playerTeam : nil }
+            .flatMap { $0.coachingStaff?.has(.destinyPick) } ?? false
+
+        let threshold = hasDP ? 80.0 : baseThreshold
+        let gapReq = hasDP ? 5.0 : baseGap
+
+        if leader.interestLevel >= threshold && gap >= gapReq {
+            recruit.isCommittedToTeamId = leaderTeam?.abbreviation
+            recruit.phaseRaw = RecruitPhase.committed.rawValue
+        }
+    }
+}
