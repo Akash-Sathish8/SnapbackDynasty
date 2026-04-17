@@ -285,11 +285,11 @@ final class RecruitingEngine {
 
         let pickCount = Int.random(in: 2...4)
         for (team, score) in scored.prefix(pickCount) {
-            // Ensure RecruitInterest exists for AI too (so slots compute).
             var interest = team.recruitInterests.first { $0.recruit === recruit }
             if interest == nil {
-                // Only add AI interest if there's a legitimate pitch to make.
                 if score < 0.7 { continue }
+                // AI teams are also subject to the board cap.
+                guard team.recruitInterests.count < Self.boardCap else { continue }
                 let newInterest = RecruitInterest(recruit: recruit, team: team)
                 context.insert(newInterest)
                 interest = newInterest
@@ -304,30 +304,30 @@ final class RecruitingEngine {
     private func recomputeSlotsAndPhase(recruit: Recruit) {
         // Rank teams by interest level.
         let ranked = recruit.interests
-            .filter { ($0.interestLevel) > 0 }
+            .filter { $0.interestLevel > 0 }
             .sorted { $0.interestLevel > $1.interestLevel }
 
         for (idx, interest) in ranked.enumerated() {
             let slot: TopListSlot
             switch idx {
-            case 0:    slot = .leader
-            case 1, 2: slot = .top3
-            case 3, 4: slot = .top5
+            case 0:       slot = .leader
+            case 1, 2:    slot = .top3
+            case 3, 4:    slot = .top5
             case 5, 6, 7: slot = .top8
-            case 8, 9:  slot = .top10
-            default:    slot = .notOnList
+            case 8, 9:    slot = .top10
+            default:      slot = .notOnList
             }
             interest.topSlotRaw = slot.rawValue
         }
 
-        // Phase transitions.
+        // Phase transitions — allowed in both directions so a recruit whose
+        // interest drops can return to an earlier phase.
         let maxInterest = ranked.first?.interestLevel ?? 0
-        let prevPhase = recruit.phase
-        var newPhase = prevPhase
-        if maxInterest >= 60 { newPhase = .close }
+        let newPhase: RecruitPhase
+        if maxInterest >= 60      { newPhase = .close }
         else if maxInterest >= 30 { newPhase = .pitch }
-        else { newPhase = .discovery }
-        if newPhase != prevPhase { recruit.phaseRaw = newPhase.rawValue }
+        else                       { newPhase = .discovery }
+        if newPhase != recruit.phase { recruit.phaseRaw = newPhase.rawValue }
     }
 
     // MARK: - Commit
@@ -340,14 +340,16 @@ final class RecruitingEngine {
         let gap = leader.interestLevel - second
         let leaderTeam = leader.team
 
-        // Destiny Pick buffs instant-commit odds.
-        let baseThreshold: Double = 85
-        let baseGap: Double = 8
-        let hasDP = playerTeam.map { $0 === leaderTeam }.flatMap { $0 ? playerTeam : nil }
-            .flatMap { $0.coachingStaff?.has(.destinyPick) } ?? false
+        // Destiny Pick buffs instant-commit odds when the player's team is the leader.
+        let hasDP: Bool
+        if let pt = playerTeam, pt === leaderTeam {
+            hasDP = pt.coachingStaff?.has(.destinyPick) ?? false
+        } else {
+            hasDP = false
+        }
 
-        let threshold = hasDP ? 80.0 : baseThreshold
-        let gapReq = hasDP ? 5.0 : baseGap
+        let threshold: Double = hasDP ? 80.0 : 85.0
+        let gapReq: Double   = hasDP ? 5.0  : 8.0
 
         if leader.interestLevel >= threshold && gap >= gapReq {
             recruit.isCommittedToTeamId = leaderTeam?.abbreviation

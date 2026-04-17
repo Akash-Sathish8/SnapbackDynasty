@@ -35,11 +35,12 @@ enum OffseasonManager {
         _ = SigningDay.run(kind: .national, allRecruits: allRecruits,
                            allTeams: allTeams, context: context)
 
-        // 2. Graduate seniors
+        // 2. Graduate seniors — delete from context to prevent orphaned record accumulation.
         var graduated = 0
         for team in allTeams {
-            for player in team.players where player.classYear == .SR {
-                player.team = nil  // detach (archived for career stats if needed)
+            let seniors = team.players.filter { $0.classYear == .SR }
+            for player in seniors {
+                context.delete(player)
                 graduated += 1
             }
         }

@@ -49,9 +49,16 @@ enum SchoolGradeEngine {
             return base + legacyBump(team.legacy, scale: 1)
 
         case .playingStyle:
-            // Proxy via offense rating + defense rating balance.
-            let off = Int(team.offenseRating / 10)
-            return 3 + off  // 3–12
+            // Derived from actual player overalls. offenseRating is reset to 50 each
+            // offseason so it can't be used here.
+            let offPlayers = team.players.filter { [.QB, .WR, .RB, .TE, .OL].contains($0.position) }
+            let defPlayers = team.players.filter { [.DL, .LB, .CB, .S].contains($0.position) }
+            let offAvg = offPlayers.isEmpty ? 60.0
+                : Double(offPlayers.map(\.overall).reduce(0, +)) / Double(offPlayers.count)
+            let defAvg = defPlayers.isEmpty ? 60.0
+                : Double(defPlayers.map(\.overall).reduce(0, +)) / Double(defPlayers.count)
+            let combined = (offAvg + defAvg) / 2.0
+            return max(1, min(13, Int((combined / 99.0 * 12).rounded()) + 1))
 
         case .titleContender:
             return scaledByLegacy(team.legacy, min: 2, max: 13)
