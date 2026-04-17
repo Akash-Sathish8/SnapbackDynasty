@@ -6,13 +6,33 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		96315CC7758CAE07225552D8 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9DEE791B0EEA5C277E8B83B4 /* Foundation.framework */; };
+		C5145D3030A58E8ECABD38E5 /* ScreenshotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8614C40349FA477B4EA0239F /* ScreenshotUITests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B7D63B862106CF99BD0AA805 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 49F8052B2F8C948900A03BFB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 49F805322F8C948900A03BFB;
+			remoteInfo = "Snapback Dynasty";
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		47536551603FA36FD3A47A9C /* Snapback DynastyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Snapback DynastyUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		49F805332F8C948900A03BFB /* Snapback Dynasty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Snapback Dynasty.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		8614C40349FA477B4EA0239F /* ScreenshotUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScreenshotUITests.swift; sourceTree = "<group>"; };
+		9DEE791B0EEA5C277E8B83B4 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		49F805352F8C948900A03BFB /* Snapback Dynasty */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = "Snapback Dynasty";
 			sourceTree = "<group>";
 		};
@@ -26,14 +46,41 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A3D7B1FA31C392DE16E84F18 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				96315CC7758CAE07225552D8 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		022B571B01EBD90E36506F7C /* Snapback DynastyUITests */ = {
+			isa = PBXGroup;
+			children = (
+				8614C40349FA477B4EA0239F /* ScreenshotUITests.swift */,
+			);
+			name = "Snapback DynastyUITests";
+			path = "Snapback DynastyUITests";
+			sourceTree = "<group>";
+		};
+		0F049079B062FD947F4B85D9 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				9DEE791B0EEA5C277E8B83B4 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
 		49F8052A2F8C948900A03BFB = {
 			isa = PBXGroup;
 			children = (
 				49F805352F8C948900A03BFB /* Snapback Dynasty */,
 				49F805342F8C948900A03BFB /* Products */,
+				80B834819EBB2CC9A8FCD404 /* Frameworks */,
+				022B571B01EBD90E36506F7C /* Snapback DynastyUITests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -41,8 +88,17 @@
 			isa = PBXGroup;
 			children = (
 				49F805332F8C948900A03BFB /* Snapback Dynasty.app */,
+				47536551603FA36FD3A47A9C /* Snapback DynastyUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		80B834819EBB2CC9A8FCD404 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				0F049079B062FD947F4B85D9 /* iOS */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -64,11 +120,27 @@
 				49F805352F8C948900A03BFB /* Snapback Dynasty */,
 			);
 			name = "Snapback Dynasty";
-			packageProductDependencies = (
-			);
 			productName = "Snapback Dynasty";
 			productReference = 49F805332F8C948900A03BFB /* Snapback Dynasty.app */;
 			productType = "com.apple.product-type.application";
+		};
+		E652702BC1EA8E96BC3D9026 /* Snapback DynastyUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3634DDD8F982A86E7A8B4833 /* Build configuration list for PBXNativeTarget "Snapback DynastyUITests" */;
+			buildPhases = (
+				27A0C9C5682C3002F9FDC14A /* Sources */,
+				A3D7B1FA31C392DE16E84F18 /* Frameworks */,
+				8BC4FB73D2AB0E5810947245 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F74D22AB18017DA2767173FF /* PBXTargetDependency */,
+			);
+			name = "Snapback DynastyUITests";
+			productName = "Snapback DynastyUITests";
+			productReference = 47536551603FA36FD3A47A9C /* Snapback DynastyUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
@@ -100,6 +172,7 @@
 			projectRoot = "";
 			targets = (
 				49F805322F8C948900A03BFB /* Snapback Dynasty */,
+				E652702BC1EA8E96BC3D9026 /* Snapback DynastyUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -112,9 +185,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		8BC4FB73D2AB0E5810947245 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		27A0C9C5682C3002F9FDC14A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C5145D3030A58E8ECABD38E5 /* ScreenshotUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49F8052F2F8C948900A03BFB /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -123,6 +211,15 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F74D22AB18017DA2767173FF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Snapback Dynasty";
+			target = 49F805322F8C948900A03BFB /* Snapback Dynasty */;
+			targetProxy = B7D63B862106CF99BD0AA805 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		49F8053E2F8C948A00A03BFB /* Debug */ = {
@@ -257,12 +354,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Snapback Dynasty";
-				INFOPLIST_KEY_UIAppFonts = (
-					"PlayfairDisplay-VariableFont_wght.ttf",
-					"PlayfairDisplay-Italic-VariableFont_wght.ttf",
-					"Lora-VariableFont_wght.ttf",
-					"Lora-Italic-VariableFont_wght.ttf",
-				);
+				INFOPLIST_KEY_UIAppFonts = "PlayfairDisplay-VariableFont_wght.ttf PlayfairDisplay-Italic-VariableFont_wght.ttf Lora-VariableFont_wght.ttf Lora-Italic-VariableFont_wght.ttf";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -296,12 +388,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Snapback Dynasty";
-				INFOPLIST_KEY_UIAppFonts = (
-					"PlayfairDisplay-VariableFont_wght.ttf",
-					"PlayfairDisplay-Italic-VariableFont_wght.ttf",
-					"Lora-VariableFont_wght.ttf",
-					"Lora-Italic-VariableFont_wght.ttf",
-				);
+				INFOPLIST_KEY_UIAppFonts = "PlayfairDisplay-VariableFont_wght.ttf PlayfairDisplay-Italic-VariableFont_wght.ttf Lora-VariableFont_wght.ttf Lora-Italic-VariableFont_wght.ttf";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -324,9 +411,57 @@
 			};
 			name = Release;
 		};
+		9AFA377A20F0FEA0DE863EBA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.akashsathish.SnapbackDynastyUITests;
+				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Snapback Dynasty";
+			};
+			name = Debug;
+		};
+		EE2C1C470802F88BFCB89F57 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.akashsathish.SnapbackDynastyUITests;
+				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Snapback Dynasty";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		3634DDD8F982A86E7A8B4833 /* Build configuration list for PBXNativeTarget "Snapback DynastyUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EE2C1C470802F88BFCB89F57 /* Release */,
+				9AFA377A20F0FEA0DE863EBA /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		49F8052E2F8C948900A03BFB /* Build configuration list for PBXProject "Snapback Dynasty" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
