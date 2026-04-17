@@ -253,7 +253,8 @@ final class RecruitingEngine {
         // 3) AI pressure — non-player teams gain passive interest on
         //    prospects in their pipeline regions.
         for recruit in allRecruits where !recruit.isSigned && recruit.isCommittedToTeamId == nil {
-            applyAIPressure(recruit: recruit, allTeams: allTeams, playerTeam: playerTeam)
+            applyAIPressure(recruit: recruit, allTeams: allTeams,
+                            playerTeam: playerTeam, allRecruits: allRecruits)
         }
 
         // 4) Recompute top-list slots + phase for each recruit.
@@ -274,28 +275,67 @@ final class RecruitingEngine {
 
     // MARK: - AI pressure
 
-    private func applyAIPressure(recruit: Recruit, allTeams: [Team], playerTeam: Team?) {
-        // Pick 2-4 competing teams based on pipeline + legacy.
+    private func applyAIPressure(recruit: Recruit, allTeams: [Team],
+                                  playerTeam: Team?, allRecruits: [Recruit]) {
         let candidates = allTeams.filter { $0 !== playerTeam }
+
         let scored: [(Team, Double)] = candidates.map { team in
             let tierMult = team.tier(for: recruit.pipeline).interestMultiplier
             let legacyScore = Double(team.legacy) / 100.0
-            return (team, tierMult * legacyScore)
+
+            // Positional need: how many more players does this team need at this position?
+            let currentAtPos = team.players.filter { $0.position == recruit.position }.count
+            let targetCount = max(1, recruit.position.rosterCount)
+            let need = max(0.0, Double(targetCount - currentAtPos) / Double(targetCount))
+            let needMult = RecruitingConfig.AI.needMultiplierFull
+                + need * (RecruitingConfig.AI.needMultiplierEmpty - RecruitingConfig.AI.needMultiplierFull)
+
+            return (team, tierMult * legacyScore * needMult)
         }.sorted { $0.1 > $1.1 }
 
         let pickCount = Int.random(in: 2...4)
         for (team, score) in scored.prefix(pickCount) {
+            // Skip if this team already has enough committed recruits + players at this position.
+            let committedAtPos = allRecruits.filter {
+                $0.position == recruit.position &&
+                $0.isCommittedToTeamId == team.abbreviation
+            }.count
+            let currentAtPos = team.players.filter { $0.position == recruit.position }.count
+            if committedAtPos + currentAtPos >= recruit.position.rosterCount { continue }
+
             var interest = team.recruitInterests.first { $0.recruit === recruit }
             if interest == nil {
-                if score < 0.7 { continue }
-                // AI teams are also subject to the board cap.
+                if score < RecruitingConfig.AI.minimumScoreToAddBoard { continue }
                 guard team.recruitInterests.count < Self.boardCap else { continue }
                 let newInterest = RecruitInterest(recruit: recruit, team: team)
                 context.insert(newInterest)
                 interest = newInterest
             }
-            let gain = Double.random(in: 1.2...3.0) * score
+
+            // Phase-aware gain.
+            let phaseMult = RecruitingConfig.AI.phaseMultipliers[recruit.phase] ?? 1.0
+            let baseGain = Double.random(
+                in: RecruitingConfig.AI.baseWeeklyGainRange.0...RecruitingConfig.AI.baseWeeklyGainRange.1
+            )
+            let gain = baseGain * score * phaseMult
             interest?.interestLevel = min(100, (interest?.interestLevel ?? 0) + gain)
+
+            // Late swoop: high-legacy teams occasionally burst-push a committed recruit.
+            guard team.legacy >= 80,
+                  let committedAbbr = recruit.isCommittedToTeamId,
+                  committedAbbr != team.abbreviation,
+                  Double.random(in: 0..<1) < RecruitingConfig.AI.swoopChance else { continue }
+
+            let swoopGain = Double.random(
+                in: RecruitingConfig.AI.swoopGainRange.0...RecruitingConfig.AI.swoopGainRange.1
+            )
+            interest?.interestLevel = min(100, (interest?.interestLevel ?? 0) + swoopGain)
+
+            // Hit the committed team's loyalty for the recruit.
+            if let committedTeam = allTeams.first(where: { $0.abbreviation == committedAbbr }),
+               let committedInterest = committedTeam.recruitInterests.first(where: { $0.recruit === recruit }) {
+                committedInterest.loyalty += RecruitingConfig.Decommit.eventHitSwoop
+            }
         }
     }
 

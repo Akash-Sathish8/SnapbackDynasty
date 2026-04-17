@@ -1,7 +1,7 @@
 # Snapback Dynasty — Change Log
 
 _Auto-generated from git history. Do not edit manually._  
-_Last updated: 2026-04-17 18:19 · branch: `ahmed/improvements`_
+_Last updated: 2026-04-17 18:21 · branch: `ahmed/improvements`_
 
 ---
 
@@ -9,7 +9,8 @@ _Last updated: 2026-04-17 18:19 · branch: `ahmed/improvements`_
 
 | Commit | Description | Date |
 |--------|-------------|------|
-| `3a7208d` | feat: add TransferEntry model and register in SwiftData schema | 2026-04-17 |
+| `3ba264a` | feat: rewrite AI recruiting with positional need, phase aggression, and late swoops | 2026-04-17 |
+| `1b93fd8` | feat: add TransferEntry model and register in SwiftData schema | 2026-04-17 |
 | `c3d9eb6` | feat: add loyalty/oversign fields, reassure action, portal season fields | 2026-04-17 |
 | `52ec841` | feat: add RecruitingConfig with all tuning constants | 2026-04-17 |
 | `ca0efaf` | docs: add recruiting AI, decommits & transfer portal design spec | 2026-04-17 |
