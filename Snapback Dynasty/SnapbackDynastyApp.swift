@@ -18,6 +18,7 @@ struct SnapbackDynastyApp: App {
             PlayerSeasonStats.self,
             DynastyHistory.self,
             Award.self,
+            TransferEntry.self,
         ])
         let config = ModelConfiguration(isStoredInMemoryOnly: false)
         do {
