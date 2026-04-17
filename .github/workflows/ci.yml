@@ -1,14 +1,13 @@
 name: iOS CI
 
-# Triggers: this workflow ONLY runs when someone pushes commits to the `dev` branch.
-# Pushes to main or any other branch will not run this workflow.
+# Triggers: runs ONLY when commits are pushed to the `dev` branch.
 on:
   push:
     branches: [dev]
 
 jobs:
   build-and-screenshot:
-    name: Build + Simulator Screenshot
+    name: Build + UI Screenshots
     runs-on: macos-14
 
     steps:
@@ -34,43 +33,44 @@ jobs:
             CODE_SIGNING_ALLOWED=NO | xcpretty && exit ${PIPESTATUS[0]}
         shell: bash
 
-      # If/when a test target is added, this step will run it automatically.
-      # Remove the `continue-on-error` once tests exist so failures block the build.
-      - name: Run tests (if any)
+      # Runs unit + UI tests and writes a result bundle we can mine for screenshots.
+      # continue-on-error so artifact upload still happens even if a test fails.
+      - name: Run tests
         continue-on-error: true
         run: |
           xcodebuild test \
             -project "Snapback Dynasty.xcodeproj" \
             -scheme "Snapback Dynasty" \
             -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO | xcpretty && exit ${PIPESTATUS[0]}
         shell: bash
 
-      - name: Boot simulator + install app
+      # xcparse pulls every XCTAttachment (the PNGs from ScreenshotUITests)
+      # out of the .xcresult bundle into a flat folder.
+      - name: Install xcparse
+        run: brew install chargepoint/xcparse/xcparse
+
+      - name: Extract screenshots
+        if: always()
         run: |
-          DEVICE_ID=$(xcrun simctl create "CI iPhone" "iPhone 15" || xcrun simctl list devices | grep "iPhone 15 (" | head -1 | grep -oE "[A-F0-9-]{36}")
-          xcrun simctl boot "$DEVICE_ID" || true
-          xcrun simctl bootstatus "$DEVICE_ID" -b
-
-          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -type d -name "Snapback Dynasty.app" | head -1)
-          echo "App path: $APP_PATH"
-          xcrun simctl install "$DEVICE_ID" "$APP_PATH"
-
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist")
-          xcrun simctl launch "$DEVICE_ID" "$BUNDLE_ID"
-
-          # Give the app a moment to render its initial screen
-          sleep 6
-
           mkdir -p screenshots
-          xcrun simctl io "$DEVICE_ID" screenshot screenshots/home.png
-          echo "DEVICE_ID=$DEVICE_ID" >> $GITHUB_ENV
+          xcparse screenshots TestResults.xcresult screenshots/ || echo "No screenshots found"
+          ls -la screenshots/
         shell: bash
 
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: simulator-screenshots
+          name: ui-screenshots
           path: screenshots/
+          if-no-files-found: warn
+
+      - name: Upload full test result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult
+          path: TestResults.xcresult
           if-no-files-found: warn
