@@ -10,7 +10,10 @@ FLAG="$REPO/.git/.changes_hook_running"
 OUTPUT="$REPO/CHANGES.md"
 
 # Bail if we're already inside a hook-triggered amend.
+# Use both an env var (inherited by subprocesses) and a file (cross-process).
+[ "${_CHANGES_HOOK_RUNNING}" = "1" ] && exit 0
 [ -f "$FLAG" ] && exit 0
+export _CHANGES_HOOK_RUNNING=1
 touch "$FLAG"
 trap 'rm -f "$FLAG"' EXIT
 
