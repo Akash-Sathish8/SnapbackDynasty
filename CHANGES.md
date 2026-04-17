@@ -1,7 +1,7 @@
 # Snapback Dynasty — Change Log
 
 _Auto-generated from git history. Do not edit manually._  
-_Last updated: 2026-04-17 18:29 · branch: `ahmed/improvements`_
+_Last updated: 2026-04-17 18:35 · branch: `ahmed/improvements`_
 
 ---
 
@@ -9,7 +9,8 @@ _Last updated: 2026-04-17 18:29 · branch: `ahmed/improvements`_
 
 | Commit | Description | Date |
 |--------|-------------|------|
-| `6ddfd06` | feat: implement TransferPortalView with retain, recruit, and history tabs | 2026-04-17 |
+| `450769d` | feat: wire portal CTA, offseason Phase A/B, and game result decommit effects into DashboardView | 2026-04-17 |
+| `299cfb8` | feat: implement TransferPortalView with retain, recruit, and history tabs | 2026-04-17 |
 | `ce286fd` | feat: split OffseasonManager into phaseA (portal open) and phaseB (advance season) | 2026-04-17 |
 | `a7cd018` | feat: add TransferPortalEngine with open, retain, board actions, offer, AI resolve, finalize | 2026-04-17 |
 | `cab24ed` | feat: add decommit loyalty system with passive drift, oversign/swoop events, and reassure action | 2026-04-17 |
