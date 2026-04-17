@@ -1,7 +1,7 @@
 # Snapback Dynasty — Change Log
 
 _Auto-generated from git history. Do not edit manually._  
-_Last updated: 2026-04-17 18:16 · branch: `ahmed/improvements`_
+_Last updated: 2026-04-17 18:18 · branch: `ahmed/improvements`_
 
 ---
 
@@ -9,7 +9,8 @@ _Last updated: 2026-04-17 18:16 · branch: `ahmed/improvements`_
 
 | Commit | Description | Date |
 |--------|-------------|------|
-| `78c0eff` | feat: add RecruitingConfig with all tuning constants | 2026-04-17 |
+| `7206973` | feat: add loyalty/oversign fields, reassure action, portal season fields | 2026-04-17 |
+| `52ec841` | feat: add RecruitingConfig with all tuning constants | 2026-04-17 |
 | `ca0efaf` | docs: add recruiting AI, decommits & transfer portal design spec | 2026-04-17 |
 
 ## On `main`

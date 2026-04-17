@@ -21,6 +21,10 @@ final class Season {
     /// Where we are in the recruiting calendar.
     var recruitingPeriodRaw: String = RecruitingPeriod.offseason.rawValue
 
+    var portalIsOpen: Bool = false
+    var portalHoursRemaining: Int = 0
+    var portalRetentionOffersRemaining: Int = 0
+
     init(year: Int) {
         self.year = year
     }
