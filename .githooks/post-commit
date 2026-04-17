@@ -64,4 +64,6 @@ rows() {
 } > "$OUTPUT"
 
 git add "$OUTPUT"
+# Only amend if CHANGES.md actually differs from what is already committed.
+git diff --staged --quiet && exit 0
 git commit --amend --no-edit --no-verify
