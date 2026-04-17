@@ -102,6 +102,16 @@ final class RecruitingEngine {
             }
         }
 
+        // Reassure is only valid when the recruit is committed to this team and loyalty is low.
+        if action == .reassure {
+            guard recruit.isCommittedToTeamId == team.abbreviation else {
+                return .gated("Recruit is not committed to your team")
+            }
+            guard interest.loyalty < RecruitingConfig.Decommit.loyaltyWarningThreshold else {
+                return .gated("Recruit is not wavering")
+            }
+        }
+
         // Phase gate on Top-5 actions.
         if action.requiresTop5 {
             if interest.topSlot.rawValue == 0 || interest.topSlot.rawValue > 5 {
@@ -139,6 +149,9 @@ final class RecruitingEngine {
             interest.hasOffered = true
         case .scheduleVisit:
             interest.visitWeek = season.currentWeek
+        case .reassure:
+            interest.loyalty = min(RecruitingConfig.Decommit.startingLoyalty,
+                                   interest.loyalty + RecruitingConfig.Decommit.reassureLoyaltyGain)
         default: break
         }
 
@@ -168,6 +181,7 @@ final class RecruitingEngine {
             case .nudge:         return 3
             case .fullPitch:     return 8
             case .reframe:       return 2
+            case .reassure:      return 0
             }
         }()
 
@@ -267,7 +281,13 @@ final class RecruitingEngine {
             checkCommit(recruit: recruit, playerTeam: playerTeam)
         }
 
-        // 6) Refresh dynamic school grades weekly.
+        // 6) Check decommits — must run after commits so newly committed recruits
+        //    don't immediately get decommit-checked the same week.
+        for recruit in allRecruits where recruit.isCommittedToTeamId != nil && !recruit.isSigned {
+            checkDecommit(recruit: recruit, allRecruits: allRecruits)
+        }
+
+        // 7) Refresh dynamic school grades weekly.
         for team in allTeams {
             SchoolGradeEngine.refreshDynamic(for: team, allTeams: allTeams, context: context)
         }
@@ -394,6 +414,65 @@ final class RecruitingEngine {
         if leader.interestLevel >= threshold && gap >= gapReq {
             recruit.isCommittedToTeamId = leaderTeam?.abbreviation
             recruit.phaseRaw = RecruitPhase.committed.rawValue
+        }
+    }
+
+    // MARK: - Decommit
+
+    func checkDecommit(recruit: Recruit, allRecruits: [Recruit]) {
+        guard let committedAbbr = recruit.isCommittedToTeamId else { return }
+        guard let committedInterest = recruit.interests.first(where: {
+            $0.team?.abbreviation == committedAbbr
+        }) else { return }
+
+        // Passive drift: erodes loyalty when a rival is within the gap threshold.
+        let rivalClose = recruit.interests.contains { interest in
+            guard interest.team?.abbreviation != committedAbbr else { return false }
+            let gap = committedInterest.interestLevel - interest.interestLevel
+            return gap < RecruitingConfig.Decommit.rivalGapThreshold
+        }
+
+        if rivalClose {
+            let drift = Double.random(
+                in: RecruitingConfig.Decommit.passiveDriftRange.0...RecruitingConfig.Decommit.passiveDriftRange.1
+            )
+            let floor = recruit.stars >= 4 ? RecruitingConfig.Decommit.loyaltyFloor4And5Star : 0.0
+            committedInterest.loyalty = max(floor, committedInterest.loyalty - drift)
+        }
+
+        // Oversign event: ≥ 3 other recruits already committed to same team at same position.
+        if !committedInterest.oversignHitApplied {
+            let samePosSameTeam = allRecruits.filter {
+                $0.position == recruit.position &&
+                $0.isCommittedToTeamId == committedAbbr &&
+                $0 !== recruit
+            }.count
+            if samePosSameTeam >= 3 {
+                committedInterest.loyalty += RecruitingConfig.Decommit.eventHitOversign
+                committedInterest.oversignHitApplied = true
+            }
+        }
+
+        // Decommit resolution.
+        guard committedInterest.loyalty <= 0 else { return }
+        recruit.isCommittedToTeamId = nil
+        recruit.phaseRaw = RecruitPhase.close.rawValue
+        committedInterest.loyalty = RecruitingConfig.Decommit.startingLoyalty
+        committedInterest.oversignHitApplied = false
+    }
+
+    /// Call from DashboardView after simulateWeek to apply big-loss loyalty hits.
+    func applyGameResultEffects(playerTeamWon: Bool, margin: Int,
+                                 playerTeam: Team, allRecruits: [Recruit]) {
+        guard !playerTeamWon && margin <= -21 else { return }
+
+        for recruit in allRecruits {
+            guard recruit.isCommittedToTeamId == playerTeam.abbreviation else { continue }
+            guard recruit.motivations.contains(.titleContender) ||
+                  recruit.motivations.contains(.tradition) else { continue }
+            if let interest = playerTeam.recruitInterests.first(where: { $0.recruit === recruit }) {
+                interest.loyalty += RecruitingConfig.Decommit.eventHitBigLoss
+            }
         }
     }
 }
