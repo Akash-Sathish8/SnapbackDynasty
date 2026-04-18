@@ -12,14 +12,11 @@ enum SigningDay {
         var records: [SigningRecord] = []
         for recruit in allRecruits {
             guard !recruit.isSigned else { continue }
-            guard let abbr = recruit.isCommittedToTeamId,
-                  let team = allTeams.first(where: { $0.abbreviation == abbr })
-            else { continue }
 
-            // On ESD: lock most commits but leave uncommitted slides for NSD.
-            // On NSD: also sign uncommitted-but-leader cases as "walk-on style" commits.
+            // On NSD: try to commit any recruit with a clear interest leader before
+            // the guard below skips them. This block was unreachable in the prior
+            // version because the guard fired first.
             if kind == .national && recruit.isCommittedToTeamId == nil {
-                // Try to force-sign: pick clear leader from interests.
                 if let leader = recruit.interests.sorted(by: { $0.interestLevel > $1.interestLevel }).first,
                    leader.interestLevel >= 50,
                    let leadTeam = leader.team {
@@ -27,10 +24,16 @@ enum SigningDay {
                 }
             }
 
+            guard let abbr = recruit.isCommittedToTeamId,
+                  let team = allTeams.first(where: { $0.abbreviation == abbr })
+            else { continue }
+
+            // Enforce 85-scholarship cap.
+            guard team.players.count < 85 else { continue }
+
             recruit.isSigned = true
             recruit.phaseRaw = RecruitPhase.signed.rawValue
 
-            // Generate a Player record on the signing team.
             let p = Player(
                 firstName: recruit.firstName,
                 lastName: recruit.lastName,

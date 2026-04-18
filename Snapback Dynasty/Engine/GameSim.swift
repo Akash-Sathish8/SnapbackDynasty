@@ -133,6 +133,50 @@ class GameSimulator {
         let scoreDiff = isHome ? homeScore - awayScore : awayScore - homeScore
 
         for _ in 0..<12 {  // max plays per drive
+
+            // Pre-snap 4th-down decision — must happen BEFORE the play is called.
+            if down == 4 {
+                let fgDistance = 100 - fieldPos + 17
+                // Go for it when trailing with short yardage, or at the goal line regardless of score.
+                let shouldGoForIt = (yardsToGo <= 2 && fieldPos >= 55 && scoreDiff < 0) ||
+                                    (yardsToGo <= 1 && fieldPos >= 93)
+                let shouldKickFG  = !shouldGoForIt && fieldPos >= 65 && fgDistance <= 52
+
+                if shouldKickFG {
+                    let kicker = offense.best(.K)
+                    let kickerOvr = Double(kicker?.overall ?? 65)
+                    let fgProb = 0.85 - Double(fgDistance - 20) * 0.018 + (kickerOvr - 70) * 0.004
+                    let made = Double.random(in: 0...1) < min(0.95, max(0.25, fgProb))
+                    let fgPlay = PlayResult(type: "fg", yards: 0, isComplete: false,
+                                            isTurnover: false, turnoverType: nil, isTouchdown: false,
+                                            scoringPlayerName: made ? kicker?.name : nil,
+                                            ballCarrierName: kicker?.name,
+                                            description: made ? "FG GOOD from \(fgDistance) yards" : "FG MISSED from \(fgDistance) yards")
+                    drivePlays.append(fgPlay)
+                    allPlays.append(fgPlay)
+                    if made { if isHome { homeScore += 3 } else { awayScore += 3 } }
+                    allDrives.append(DriveResult(teamName: offense.name, startPosition: startPos,
+                                                 plays: drivePlays, result: made ? "FG" : "FG_MISS",
+                                                 totalYards: driveYards, scoring: made ? 3 : 0))
+                    return
+                } else if !shouldGoForIt {
+                    let puntDist = max(28, min(62, Int(gaussRandom(mean: 42, std: 7))))
+                    let punter = offense.best(.P)
+                    let puntPlay = PlayResult(type: "punt", yards: 0, isComplete: false,
+                                              isTurnover: false, turnoverType: nil, isTouchdown: false,
+                                              scoringPlayerName: nil, ballCarrierName: punter?.name,
+                                              description: "\(punter?.shortName ?? "Punter") punts \(puntDist) yards")
+                    drivePlays.append(puntPlay)
+                    allPlays.append(puntPlay)
+                    if drivePlays.count <= 3 { adjustMomentum(toward: !isHome, amount: 0.10) }
+                    allDrives.append(DriveResult(teamName: offense.name, startPosition: startPos,
+                                                 plays: drivePlays, result: "PUNT",
+                                                 totalYards: driveYards, scoring: 0))
+                    return
+                }
+                // else: going for it — fall through to simulatePlay below
+            }
+
             let play = simulatePlay(
                 offense: offense, defense: defense,
                 fieldPos: fieldPos, down: down, yardsToGo: yardsToGo,
@@ -143,10 +187,10 @@ class GameSimulator {
 
             if play.isTurnover {
                 adjustMomentum(toward: !isHome, amount: 0.20)
-                let dr = DriveResult(teamName: offense.name, startPosition: startPos,
-                                     plays: drivePlays, result: play.turnoverType == "INT" ? "TURNOVER_INT" : "TURNOVER_FUMBLE",
-                                     totalYards: driveYards, scoring: 0)
-                allDrives.append(dr)
+                allDrives.append(DriveResult(teamName: offense.name, startPosition: startPos,
+                                             plays: drivePlays,
+                                             result: play.turnoverType == "INT" ? "TURNOVER_INT" : "TURNOVER_FUMBLE",
+                                             totalYards: driveYards, scoring: 0))
                 return
             }
 
@@ -154,13 +198,12 @@ class GameSimulator {
             driveYards += play.yards
 
             if play.isTouchdown || fieldPos >= 100 {
-                let pts = 7  // assume XP
+                let pts = 7
                 if isHome { homeScore += pts } else { awayScore += pts }
                 adjustMomentum(toward: isHome, amount: 0.15)
-                let dr = DriveResult(teamName: offense.name, startPosition: startPos,
-                                     plays: drivePlays, result: "TD",
-                                     totalYards: driveYards, scoring: pts)
-                allDrives.append(dr)
+                allDrives.append(DriveResult(teamName: offense.name, startPosition: startPos,
+                                             plays: drivePlays, result: "TD",
+                                             totalYards: driveYards, scoring: pts))
                 return
             }
 
@@ -171,60 +214,18 @@ class GameSimulator {
                 down += 1
             }
 
+            // Failed 4th-down go-for-it: turnover on downs.
             if down > 4 {
-                // 4th down decisions
-                let fgDistance = 100 - fieldPos + 17
-                if fieldPos >= 65 && fgDistance <= 52 {
-                    // FG attempt
-                    let kicker = offense.best(.K)
-                    let kickerOvr = Double(kicker?.overall ?? 65)
-                    let fgProb = 0.85 - Double(fgDistance - 20) * 0.018 + (kickerOvr - 70) * 0.004
-                    let made = Double.random(in: 0...1) < min(0.95, max(0.25, fgProb))
-                    let fgPlay = PlayResult(type: "fg", yards: 0, isComplete: false,
-                                            isTurnover: false, turnoverType: nil,
-                                            isTouchdown: false,
-                                            scoringPlayerName: made ? kicker?.name : nil,
-                                            ballCarrierName: kicker?.name,
-                                            description: made ? "FG GOOD from \(fgDistance) yards" : "FG MISSED from \(fgDistance) yards")
-                    drivePlays.append(fgPlay)
-                    allPlays.append(fgPlay)
-                    if made {
-                        if isHome { homeScore += 3 } else { awayScore += 3 }
-                    }
-                    let dr = DriveResult(teamName: offense.name, startPosition: startPos,
-                                         plays: drivePlays, result: made ? "FG" : "FG_MISS",
-                                         totalYards: driveYards, scoring: made ? 3 : 0)
-                    allDrives.append(dr)
-                    return
-                } else if yardsToGo <= 2 && fieldPos >= 55 && scoreDiff < 0 {
-                    // Go for it — continue
-                    down = 1; yardsToGo = 10
-                } else {
-                    // Punt
-                    let puntDist = max(28, min(62, Int(gaussRandom(mean: 42, std: 7))))
-                    let punter = offense.best(.P)
-                    let puntPlay = PlayResult(type: "punt", yards: 0, isComplete: false,
-                                              isTurnover: false, turnoverType: nil,
-                                              isTouchdown: false, scoringPlayerName: nil,
-                                              ballCarrierName: punter?.name,
-                                              description: "\(punter?.shortName ?? "Punter") punts \(puntDist) yards")
-                    drivePlays.append(puntPlay)
-                    allPlays.append(puntPlay)
-                    if drivePlays.count <= 3 { adjustMomentum(toward: !isHome, amount: 0.10) }
-                    let dr = DriveResult(teamName: offense.name, startPosition: startPos,
-                                         plays: drivePlays, result: "PUNT",
-                                         totalYards: driveYards, scoring: 0)
-                    allDrives.append(dr)
-                    return
-                }
+                allDrives.append(DriveResult(teamName: offense.name, startPosition: startPos,
+                                             plays: drivePlays, result: "PUNT",
+                                             totalYards: driveYards, scoring: 0))
+                return
             }
         }
 
-        // Max plays reached
-        let dr = DriveResult(teamName: offense.name, startPosition: startPos,
-                             plays: drivePlays, result: "END_OF_HALF",
-                             totalYards: driveYards, scoring: 0)
-        allDrives.append(dr)
+        allDrives.append(DriveResult(teamName: offense.name, startPosition: startPos,
+                                     plays: drivePlays, result: "END_OF_HALF",
+                                     totalYards: driveYards, scoring: 0))
     }
 
     // MARK: - Play simulation

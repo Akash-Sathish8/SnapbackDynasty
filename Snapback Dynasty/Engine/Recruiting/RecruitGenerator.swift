@@ -5,9 +5,9 @@ import SwiftData
 /// but with our synonym terminology (All In / Full Pitch / Nudge / Reframe).
 enum RecruitGenerator {
 
-    /// Default class size. CFB 25 ships ~3,500; CFB 26 ~4,100. We use 800
-    /// for fast seeding on mobile — still ~6 per team which is plenty.
-    static let classSize: Int = 800
+    /// Default class size. CFB 25 ships ~3,500; CFB 26 ~4,100. We use 1500
+    /// for mobile — enough to keep K/P pools deep without seeding lag.
+    static let classSize: Int = 1500
 
     /// Star distribution: pyramid-shaped.
     /// 5★ 2%, 4★ 10%, 3★ 35%, 2★ 35%, 1★ 18%

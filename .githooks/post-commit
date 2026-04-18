@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Regenerates CHANGES.md after every commit and amends it in.
+# Uses a flag file to prevent infinite recursion.
+#
+# One-time setup after cloning:
+#   git config core.hooksPath .githooks
+
+REPO="$(git rev-parse --show-toplevel)"
+FLAG="$REPO/.git/.changes_hook_running"
+OUTPUT="$REPO/CHANGES.md"
+
+# Bail if we're already inside a hook-triggered amend.
+# Use both an env var (inherited by subprocesses) and a file (cross-process).
+[ "${_CHANGES_HOOK_RUNNING}" = "1" ] && exit 0
+[ -f "$FLAG" ] && exit 0
+export _CHANGES_HOOK_RUNNING=1
+touch "$FLAG"
+trap 'rm -f "$FLAG"' EXIT
+
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+DATE="$(date '+%Y-%m-%d %H:%M')"
+
+main_exists() {
+    git rev-parse --verify main >/dev/null 2>&1
+}
+
+rows() {
+    # Usage: rows <git log args...>
+    # Outputs markdown table rows; each line is one commit.
+    git log "$@" --pretty=format:"| \`%h\` | %s | %ad |" --date=short 2>/dev/null
+}
+
+{
+    printf '# Snapback Dynasty — Change Log\n\n'
+    printf '_Auto-generated from git history. Do not edit manually._  \n'
+    printf '_Last updated: %s · branch: `%s`_\n\n' "$DATE" "$BRANCH"
+    printf '%s\n\n' '---'
+
+    # -- Branch section: commits on current branch not yet in main --
+    if [ "$BRANCH" != "main" ] && main_exists; then
+        BRANCH_ROWS="$(rows HEAD --not main)"
+        if [ -n "$BRANCH_ROWS" ]; then
+            printf '## On `%s` — not yet merged to main\n\n' "$BRANCH"
+            printf '| Commit | Description | Date |\n'
+            printf '|--------|-------------|------|\n'
+            printf '%s\n\n' "$BRANCH_ROWS"
+        fi
+    fi
+
+    # -- Main section --
+    if main_exists; then
+        MAIN_ROWS="$(rows main)"
+    elif [ "$BRANCH" = "main" ]; then
+        MAIN_ROWS="$(rows HEAD)"
+    fi
+
+    if [ -n "$MAIN_ROWS" ]; then
+        printf '## On `main`\n\n'
+        printf '| Commit | Description | Date |\n'
+        printf '|--------|-------------|------|\n'
+        printf '%s\n' "$MAIN_ROWS"
+    fi
+
+} > "$OUTPUT"
+
+git add "$OUTPUT"
+# Only amend if CHANGES.md actually differs from what is already committed.
+git diff --staged --quiet && exit 0
+git commit --amend --no-edit --no-verify

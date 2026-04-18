@@ -12,6 +12,7 @@ enum RecruitingAction: String, Codable, CaseIterable {
     case nudge          = "Nudge"
     case fullPitch      = "Full Pitch"
     case reframe        = "Reframe"
+    case reassure       = "Reassure"
 
     var hourCost: Int {
         switch self {
@@ -25,6 +26,7 @@ enum RecruitingAction: String, Codable, CaseIterable {
         case .nudge:         return 20
         case .fullPitch:     return 40
         case .reframe:       return 30
+        case .reassure:      return 30
         }
     }
 

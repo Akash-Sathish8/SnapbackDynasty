@@ -67,6 +67,12 @@ class SeasonManager {
             }
         }
 
+        // Build a unified Set of all paired matchups (sorted names) for O(1) duplicate checks.
+        var scheduledPairs: Set<String> = pairedSet  // pairedSet already has all conf pairings
+        for (h, a, _) in allGames {
+            scheduledPairs.insert([h.name, a.name].sorted().joined(separator: "|"))
+        }
+
         // Track how many games each team has
         var gameCounts: [String: Int] = [:]
         for t in teams { gameCounts[t.name] = 0 }
@@ -77,7 +83,7 @@ class SeasonManager {
 
         // Fill non-conference to reach 10 games per team
         var allTeamsList = teams.shuffled()
-        for _ in 0..<200 { // safety limit
+        for _ in 0..<200 {
             allTeamsList.shuffle()
             var added = false
             for i in 0..<allTeamsList.count {
@@ -86,17 +92,15 @@ class SeasonManager {
                 for j in (i+1)..<allTeamsList.count {
                     let t2 = allTeamsList[j]
                     guard (gameCounts[t2.name] ?? 0) < 10 else { continue }
-                    // Don't duplicate
-                    let alreadyPlay = allGames.contains { ($0.0.name == t1.name && $0.1.name == t2.name) ||
-                                                          ($0.0.name == t2.name && $0.1.name == t1.name) }
-                    guard !alreadyPlay else { continue }
-                    // Different conferences (or at least one independent)
+                    let pairKey = [t1.name, t2.name].sorted().joined(separator: "|")
+                    guard !scheduledPairs.contains(pairKey) else { continue }
                     let sameConf = t1.conference?.name == t2.conference?.name && t1.conference != nil
                     guard !sameConf else { continue }
 
                     let home = Bool.random() ? t1 : t2
                     let away = home.name == t1.name ? t2 : t1
                     allGames.append((home, away, false))
+                    scheduledPairs.insert(pairKey)
                     gameCounts[t1.name, default: 0] += 1
                     gameCounts[t2.name, default: 0] += 1
                     added = true
@@ -105,13 +109,13 @@ class SeasonManager {
                 if added { break }
             }
             if !added {
-                // Check if everyone has 10 or close
                 let minGames = gameCounts.values.min() ?? 10
                 if minGames >= 9 { break }
-                // Force pair any two teams under 10
                 let under = allTeamsList.filter { (gameCounts[$0.name] ?? 0) < 10 }
                 if under.count >= 2 {
+                    let pairKey = [under[0].name, under[1].name].sorted().joined(separator: "|")
                     allGames.append((under[0], under[1], false))
+                    scheduledPairs.insert(pairKey)
                     gameCounts[under[0].name, default: 0] += 1
                     gameCounts[under[1].name, default: 0] += 1
                 } else { break }
@@ -224,49 +228,39 @@ class SeasonManager {
     // MARK: - Rankings
 
     func getRankings(season: Season, teams: [Team]) -> [(Team, Double)] {
-        var ranked: [(Team, Double)] = []
-        for team in teams {
+        // Pre-compute all per-team stats in a single pass to avoid O(teams × games) fetches.
+        let playedGames = fetchGames(for: season).filter(\.isPlayed)
+        var ptFor:     [String: Int]    = [:]
+        var ptAgainst: [String: Int]    = [:]
+        var oppLegacy: [String: [Int]]  = [:]
+
+        for g in playedGames {
+            guard let home = g.homeTeam, let away = g.awayTeam,
+                  let hScore = g.homeScore, let aScore = g.awayScore else { continue }
+            ptFor[home.name,     default: 0]  += hScore
+            ptAgainst[home.name, default: 0]  += aScore
+            ptFor[away.name,     default: 0]  += aScore
+            ptAgainst[away.name, default: 0]  += hScore
+            oppLegacy[home.name, default: []].append(away.legacy)
+            oppLegacy[away.name, default: []].append(home.legacy)
+        }
+
+        return teams.map { team in
             let gamesPlayed = team.wins + team.losses
-            guard gamesPlayed > 0 else {
-                ranked.append((team, Double(team.legacy) * 0.25))
-                continue
-            }
-            let sos = averageOpponentLegacy(team: team, season: season)
-            let ptDiff = pointDifferential(team: team, season: season)
+            guard gamesPlayed > 0 else { return (team, Double(team.legacy) * 0.25) }
+
+            let opponents = oppLegacy[team.name] ?? []
+            let sos = opponents.isEmpty ? 0.0
+                : Double(opponents.reduce(0, +)) / Double(opponents.count) / 100.0
+            let diff = Double((ptFor[team.name] ?? 0) - (ptAgainst[team.name] ?? 0))
             let power = Double(team.wins) * 12
                 - Double(team.losses) * 8
                 + Double(team.legacy) * 0.25
                 + sos * 6
-                + ptDiff / Double(gamesPlayed) * 1.5
+                + diff / Double(gamesPlayed) * 1.5
                 + Double(team.conferenceWins) * 2
-            ranked.append((team, power))
-        }
-        return ranked.sorted { $0.1 > $1.1 }
-    }
-
-    private func averageOpponentLegacy(team: Team, season: Season) -> Double {
-        let allGames = fetchGames(for: season)
-        let opponents = allGames.compactMap { g -> Team? in
-            guard g.isPlayed else { return nil }
-            if g.homeTeam?.name == team.name { return g.awayTeam }
-            if g.awayTeam?.name == team.name { return g.homeTeam }
-            return nil
-        }
-        guard !opponents.isEmpty else { return 0 }
-        return Double(opponents.map(\.legacy).reduce(0, +)) / Double(opponents.count) / 100.0
-    }
-
-    private func pointDifferential(team: Team, season: Season) -> Double {
-        let allGames = fetchGames(for: season)
-        var diff = 0
-        for g in allGames where g.isPlayed {
-            if g.homeTeam?.name == team.name {
-                diff += (g.homeScore ?? 0) - (g.awayScore ?? 0)
-            } else if g.awayTeam?.name == team.name {
-                diff += (g.awayScore ?? 0) - (g.homeScore ?? 0)
-            }
-        }
-        return Double(diff)
+            return (team, power)
+        }.sorted { $0.1 > $1.1 }
     }
 
     // MARK: - Standings

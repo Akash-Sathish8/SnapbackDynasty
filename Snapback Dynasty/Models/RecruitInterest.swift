@@ -22,6 +22,9 @@ final class RecruitInterest {
     /// Did the recruit take a visit with this team? And when (week).
     var visitWeek: Int?
 
+    var loyalty: Double = 20.0
+    var oversignHitApplied: Bool = false
+
     /// Their current top-list slot from this team's perspective.
     var topSlotRaw: Int = TopListSlot.notOnList.rawValue
 

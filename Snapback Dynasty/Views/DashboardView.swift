@@ -244,19 +244,35 @@ struct DashboardView: View {
                         .font(.lora(12, weight: .semibold))
                         .foregroundStyle(Color(hex: "#15803D"))
 
-                    Button {
-                        let summary = OffseasonManager.runOffseason(
-                            currentSeason: season, allTeams: allTeams, context: context)
-                        print("Offseason complete: graduated \(summary.graduated), developed \(summary.developed), new year \(summary.newSeasonYear)")
-                    } label: {
-                        Text("Advance to Offseason →")
-                            .font(.lora(12, weight: .bold))
-                            .kerning(0.5)
-                            .padding(.horizontal, 20).padding(.vertical, 10)
-                            .background(primary, in: RoundedRectangle(cornerRadius: 6))
-                            .foregroundStyle(isLightHex(playerTeam?.primaryColor ?? "#7BAFD4") ? .black : .white)
+                    if season.portalIsOpen {
+                        NavigationLink {
+                            TransferPortalView()
+                        } label: {
+                            Text("Open Transfer Portal →")
+                                .font(.lora(12, weight: .bold))
+                                .kerning(0.5)
+                                .padding(.horizontal, 20).padding(.vertical, 10)
+                                .background(primary, in: RoundedRectangle(cornerRadius: 6))
+                                .foregroundStyle(isLightHex(team.primaryColor) ? .black : .white)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button {
+                            OffseasonManager.runOffseasonPhaseA(
+                                currentSeason: season,
+                                allTeams: allTeams,
+                                playerTeam: playerTeam,
+                                context: context)
+                        } label: {
+                            Text("Advance to Offseason →")
+                                .font(.lora(12, weight: .bold))
+                                .kerning(0.5)
+                                .padding(.horizontal, 20).padding(.vertical, 10)
+                                .background(primary, in: RoundedRectangle(cornerRadius: 6))
+                                .foregroundStyle(isLightHex(team.primaryColor) ? .black : .white)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
                 .padding(.vertical, 6)
             }
@@ -374,7 +390,7 @@ struct DashboardView: View {
         guard let season else { return }
         isSimming = true
         let results = manager.simulateWeek(season: season, week: week)
-
+        applyRecruitingGameEffects(results: results, season: season)
         advanceRecruiting(season: season)
         runSigningDaysIfNeeded(week: week, season: season)
 
@@ -396,7 +412,8 @@ struct DashboardView: View {
         guard let season else { return }
         isSimming = true
         while let week = manager.nextWeek(season: season), week <= 10 {
-            _ = manager.simulateWeek(season: season, week: week)
+            let results = manager.simulateWeek(season: season, week: week)
+            applyRecruitingGameEffects(results: results, season: season)
             advanceRecruiting(season: season)
             runSigningDaysIfNeeded(week: week, season: season)
         }
@@ -414,6 +431,25 @@ struct DashboardView: View {
         let recruits = (try? context.fetch(FetchDescriptor<Recruit>())) ?? []
         engine.advanceWeek(season: season, playerTeam: playerTeam,
                            allTeams: allTeams, allRecruits: recruits)
+    }
+
+    private func applyRecruitingGameEffects(results: [(Game, GameResult)], season: Season) {
+        guard let team = playerTeam else { return }
+        guard let playerResult = results.first(where: {
+            $0.0.homeTeam?.name == team.name || $0.0.awayTeam?.name == team.name
+        }) else { return }
+
+        let game = playerResult.0
+        let result = playerResult.1
+        let isHome = game.homeTeam?.name == team.name
+        let playerScore = isHome ? result.homeScore : result.awayScore
+        let oppScore = isHome ? result.awayScore : result.homeScore
+        let margin = playerScore - oppScore
+
+        let recruits = (try? context.fetch(FetchDescriptor<Recruit>())) ?? []
+        RecruitingEngine(context: context)
+            .applyGameResultEffects(playerTeamWon: margin > 0, margin: margin,
+                                    playerTeam: team, allRecruits: recruits)
     }
 
     // MARK: - Gameplay integration
