@@ -14,8 +14,9 @@ enum FieldRenderer {
     static let yardSpacing: CGFloat = 13     // pts per yard (along X)
     /// Full length along screen X, including both endzones.
     static let fieldLength: CGFloat = CGFloat(yardsOnField) * yardSpacing + endZoneDepth * 2
-    /// Field height along screen Y (sideline-to-sideline thickness).
-    static let fieldWidth: CGFloat = 360
+    /// Field height along screen Y (sideline-to-sideline thickness). Sized to
+    /// exactly fill the scene's 400pt vertical extent — no top/bottom margin.
+    static let fieldWidth: CGFloat = 400
 
     /// Kelly-green Retro Bowl grass color.
     static let grassColor = SKColor(red: 0.27, green: 0.64, blue: 0.24, alpha: 1.0)

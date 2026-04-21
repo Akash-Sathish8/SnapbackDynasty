@@ -23,7 +23,7 @@ enum Formation: String, CaseIterable, Codable {
     }
 
     var slots: [Slot] {
-        let fw: CGFloat = 160  // half field width
+        let fw: CGFloat = 190  // half field width — matches FieldRenderer.fieldWidth / 2 - 10pt margin
         switch self {
         case .shotgun:
             return [

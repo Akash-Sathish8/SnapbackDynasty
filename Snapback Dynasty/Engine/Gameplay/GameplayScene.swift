@@ -121,11 +121,13 @@ class GameplayScene: SKScene {
 
         // Defense — 4-3 positions. Tuple is (lateral offset, upfield offset)
         // in the same convention as formation slots.
+        // Outside CBs widen to match the wider field so they line up with
+        // outside WRs at ±180. LB/safety spread scales similarly.
         let defPositions: [(CGFloat, CGFloat)] = [
             (-36, 14), (-12, 14), (12, 14), (36, 14),
-            (-40, 38), (0, 38), (40, 38),
-            (-90, 60), (90, 60),
-            (-30, 82), (30, 82),
+            (-50, 38), (0, 38), (50, 38),
+            (-140, 60), (140, 60),
+            (-40, 96), (40, 96),
         ]
         for (i, pos) in defPositions.enumerated() {
             let sprite = PlayerSprite(
