@@ -49,14 +49,19 @@ final class GameState {
     var resultIsPositive: Bool = true
 
     // MARK: - Live throw targets
-    /// Throwable receivers for the current pass play. Populated on snap,
-    /// cleared when the play ends. Drives the THROW buttons in the HUD.
+    /// Retained for legacy/accessibility. The active Retro Bowl-style aim
+    /// mechanic replaces tap-receiver throws, but we keep this type around
+    /// in case we re-expose direct receiver buttons later.
     struct ReceiverOption: Identifiable, Equatable {
         let id: String      // Formation.SlotRole.rawValue
         let label: String   // X / Z / SLOT / TE / RB
         let jersey: Int
     }
     var receiverOptions: [ReceiverOption] = []
+
+    /// When true, dragging on the field moves the QB (scramble) instead of
+    /// arming an aimed throw. Toggled by the SCRAMBLE button in the HUD.
+    var scrambleMode: Bool = false
 
     // MARK: - Computed
     var downText: String {

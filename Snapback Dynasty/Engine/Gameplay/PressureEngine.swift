@@ -6,19 +6,23 @@ class PressureEngine {
     /// Time elapsed since snap. Used for pressure timing.
     var elapsed: TimeInterval = 0
 
+    /// True once the OL hold window has expired — useful for UI cues.
+    var pocketIsCollapsing: Bool { elapsed > olHoldSeconds }
+
     /// DL rush speed, computed from attributes + defensive play multiplier.
     var rushSpeed: CGFloat = 1.0
 
-    /// Points per second the DL moves toward QB.
-    /// Tuned so a neutral-stat play gives ~4-5s in the pocket.
-    private let baseSpeed: CGFloat = 14
+    /// Points per second the DL moves toward QB at full ramp.
+    /// Tuned so a neutral-stat play gives ~2-3s of safe pocket then a
+    /// fast collapse that forces a quick decision (Retro Bowl feel).
+    private let baseSpeed: CGFloat = 18
 
     /// How far the DL must be from QB to trigger a sack.
     let sackThreshold: CGFloat = 8
 
-    /// OL holds before DL starts pushing through. Extended to feel like
-    /// a real pocket rather than instant pressure.
-    private let olHoldSeconds: TimeInterval = 1.5
+    /// OL holds before DL starts pushing through. 1.8s is the "pocket's fine"
+    /// window; after that, ramp kicks in and the DL accelerates quickly.
+    private let olHoldSeconds: TimeInterval = 1.8
 
     /// Previous QB position — used to estimate QB drag velocity so DL can
     /// pursue at a matching pace instead of being outrun by fast swipes.
@@ -55,10 +59,16 @@ class PressureEngine {
         // OL holds for pocket time before DL starts moving
         guard elapsed > olHoldSeconds else { return false }
 
+        // Ramp: DL eases into the rush over ~1.25s, then full speed. This
+        // gives a readable "pocket's collapsing RIGHT NOW" beat rather than
+        // a flat crawl after the hold ends.
+        let timeAfterHold = elapsed - olHoldSeconds
+        let rampFactor = min(1.0, 0.5 + CGFloat(timeAfterHold) * 0.4)
+
         // When the QB is scrambling fast, DL pursue at a matching rate
         // (scaled by stats) rather than a flat base speed. This prevents
         // the QB from simply outrunning pressure by dragging quickly.
-        let matchedSpeed = max(rushSpeed, qbVelocity * pursuitFactor)
+        let matchedSpeed = max(rushSpeed * rampFactor, qbVelocity * pursuitFactor)
 
         for dl in dlNodes {
             let direction = CGPoint(

@@ -34,6 +34,22 @@ class PlayerSprite: SKNode {
         didSet { updateSweetSpot() }
     }
 
+    /// Set by the pressure engine once the pocket starts collapsing. Tints
+    /// the helmet red so the player has a readable "rush is here" cue.
+    var isRushing: Bool = false {
+        didSet { updateRushing() }
+    }
+
+    /// Temporary stun after a broken tackle — sprite flickers and the
+    /// breakaway logic skips pursuit until the stun window expires.
+    var isStunned: Bool = false {
+        didSet { updateStunned() }
+    }
+
+    /// Scene timestamp at which an active stun expires. Written by
+    /// GameplayScene, read by PressureEngine / run-defense loops.
+    var stunnedUntil: TimeInterval = 0
+
     // MARK: - Dimensions (retro-bowl proportions)
     static let bodyWidth: CGFloat = 11
     static let helmetHeight: CGFloat = 7
@@ -129,6 +145,28 @@ class PlayerSprite: SKNode {
         ring.name = "qb_ring"
         addChild(ring)
         highlightRing = ring
+    }
+
+    private func updateRushing() {
+        if isRushing {
+            // Red overlay on the jersey to signal the pocket is collapsing.
+            jersey.fillColor = SKColor(red: 0.90, green: 0.15, blue: 0.15, alpha: 1)
+        } else {
+            jersey.fillColor = PlayerSprite.skColor(hex: jerseyColor)
+        }
+    }
+
+    private func updateStunned() {
+        removeAction(forKey: "stun_flicker")
+        if isStunned {
+            let flicker = SKAction.repeatForever(SKAction.sequence([
+                SKAction.fadeAlpha(to: 0.4, duration: 0.1),
+                SKAction.fadeAlpha(to: 1.0, duration: 0.1),
+            ]))
+            run(flicker, withKey: "stun_flicker")
+        } else {
+            alpha = 1
+        }
     }
 
     private func updateSweetSpot() {

@@ -38,6 +38,21 @@ class GameplayScene: SKScene {
     /// LBs/CBs man up, safeties play deep help.
     private var coverageAssignments: [Int: Formation.SlotRole] = [:]
 
+    /// Last few RB (position, timestamp) samples. Used to compute drag
+    /// velocity for swipe-break-tackle detection.
+    private var rbRecentSamples: [(pos: CGPoint, t: TimeInterval)] = []
+
+    // MARK: - Aim-and-release passing state (Retro Bowl-style)
+    /// True while the user is actively dragging from the QB to aim a throw.
+    private var isAimingThrow = false
+    /// True while the football is mid-flight after release; camera follows the
+    /// ball instead of the QB during this window so the user sees the catch.
+    private var isBallInFlight = false
+    /// Overlay nodes drawn under the camera so they sit above the field but
+    /// move with the zoom. Created on aim-start, removed on release.
+    private var aimArcLine: SKShapeNode?
+    private var aimTargetRing: SKShapeNode?
+
     // MARK: - Lifecycle
 
     override func didMove(to view: SKView) {
@@ -158,6 +173,7 @@ class GameplayScene: SKScene {
         qbSprite = nil
         rbSprite = nil
         coverageAssignments = [:]
+        rbRecentSamples.removeAll()
     }
 
     private func slotJersey(_ role: Formation.SlotRole) -> Int {
@@ -187,50 +203,20 @@ class GameplayScene: SKScene {
         pressure.configure(dlSpeed: theirDL, olStrength: myOL,
                            defense: gameState.currentDefense)
 
+        // The new aim-and-release mechanic replaces tap-receiver buttons,
+        // so receiverOptions stays empty during the play.
+        gameState.receiverOptions = []
+        gameState.scrambleMode = false
+
         if play.isRunPlay {
             gameState.phase = .runningPlay
-            gameState.receiverOptions = []
             animateHandoff(play: play)
         } else {
             gameState.phase = .livePlay
-            gameState.receiverOptions = buildReceiverOptions(play: play)
             animateRoutes(play: play)
         }
 
         ballSprite.position = qb.position
-    }
-
-    /// Build the throwable-receiver list that drives the THROW buttons.
-    private func buildReceiverOptions(play: PlayDefinition) -> [GameState.ReceiverOption] {
-        play.routes.compactMap { (role, route) in
-            guard route.name != "Block", role != .qb, role != .rb2 else { return nil }
-            return GameState.ReceiverOption(
-                id: role.rawValue,
-                label: receiverLabel(role),
-                jersey: slotJersey(role)
-            )
-        }
-        .sorted { $0.label < $1.label }
-    }
-
-    private func receiverLabel(_ role: Formation.SlotRole) -> String {
-        switch role {
-        case .wr1: return "X"
-        case .wr2: return "Z"
-        case .wr3: return "SLOT"
-        case .te:  return "TE"
-        case .rb, .rb2: return "RB"
-        default:   return role.rawValue.uppercased()
-        }
-    }
-
-    /// Public entry point for SwiftUI throw buttons.
-    func throwToRoleID(_ id: String) {
-        guard playActive,
-              gameState.phase == .livePlay,
-              let role = Formation.SlotRole(rawValue: id),
-              let sprite = offensePlayers[role] else { return }
-        throwTo(role: role, sprite: sprite)
     }
 
     // MARK: - Route animation
@@ -281,8 +267,12 @@ class GameplayScene: SKScene {
             ballSprite.position = qbSprite?.position ?? ballSprite.position
         }
 
-        // Camera follows ball carrier (QB on pass, RB on run).
+        // Camera follows the most relevant actor:
+        //   ball in flight → ball (so user tracks the catch)
+        //   running play  → RB
+        //   otherwise     → QB
         let followY: CGFloat? = {
+            if isBallInFlight { return ballSprite.position.y }
             if isDraggingRB, let rb = rbSprite { return rb.position.y }
             if let qb = qbSprite { return qb.position.y }
             return nil
@@ -305,6 +295,14 @@ class GameplayScene: SKScene {
                 }
             }
 
+            // Red-tint DL once the pocket starts to break so the user sees
+            // pressure coming.
+            if pressure.pocketIsCollapsing {
+                for dl in defensePlayers.prefix(4) {
+                    if !dl.isRushing { dl.isRushing = true }
+                }
+            }
+
             // Sweet spot timing windows
             checkSweetSpots()
 
@@ -312,13 +310,25 @@ class GameplayScene: SKScene {
             updateCoverage(dt: dt)
         }
 
-        // Run play: check tackle
+        // Run play: track RB drag velocity, check breakaway, then tackle
         if gameState.phase == .runningPlay, isDraggingRB, let rb = rbSprite {
+            sampleRBPosition(rb.position, at: currentTime)
+
+            var tackled = false
             for def in defensePlayers {
+                if def.isStunned && currentTime < def.stunnedUntil { continue }
+                if def.isStunned && currentTime >= def.stunnedUntil {
+                    def.isStunned = false
+                }
                 let dx = def.position.x - rb.position.x
                 let dy = def.position.y - rb.position.y
                 let dist = sqrt(dx * dx + dy * dy)
                 if dist < 12 {
+                    if attemptBreakTackle(rb: rb, defender: def, at: currentTime) {
+                        // Tackle broken — defender stunned, RB keeps moving.
+                        continue
+                    }
+                    tackled = true
                     isDraggingRB = false
                     playActive = false
                     let losY = FieldRenderer.yPosition(
@@ -331,8 +341,11 @@ class GameplayScene: SKScene {
                     break
                 }
             }
-            // Defenders converge on RB
+            if tackled { return }
+
+            // Defenders converge on RB (skip stunned ones)
             for def in defensePlayers {
+                if def.isStunned && currentTime < def.stunnedUntil { continue }
                 let dir = CGPoint(x: rb.position.x - def.position.x,
                                    y: rb.position.y - def.position.y)
                 let len = sqrt(dir.x * dir.x + dir.y * dir.y)
@@ -342,6 +355,85 @@ class GameplayScene: SKScene {
                 def.position.y += (dir.y / len) * speed
             }
         }
+    }
+
+    // MARK: - Breakaway moves
+
+    private func sampleRBPosition(_ pos: CGPoint, at time: TimeInterval) {
+        rbRecentSamples.append((pos, time))
+        if rbRecentSamples.count > 5 {
+            rbRecentSamples.removeFirst(rbRecentSamples.count - 5)
+        }
+    }
+
+    /// Returns the RB's drag velocity (points/second) over the last ~5 frames,
+    /// or zero if there's not enough history.
+    private func currentRBVelocity() -> CGPoint {
+        guard rbRecentSamples.count >= 2,
+              let first = rbRecentSamples.first,
+              let last = rbRecentSamples.last,
+              last.t > first.t else { return .zero }
+        let dt = last.t - first.t
+        return CGPoint(
+            x: (last.pos.x - first.pos.x) / CGFloat(dt),
+            y: (last.pos.y - first.pos.y) / CGFloat(dt)
+        )
+    }
+
+    /// Attempt to shrug off an incoming defender with a stiff-arm (forward
+    /// drag) or juke (lateral drag). Success depends on RB speed/strength.
+    /// Returns true if the tackle was broken.
+    private func attemptBreakTackle(rb: PlayerSprite, defender: PlayerSprite,
+                                    at time: TimeInterval) -> Bool {
+        let velocity = currentRBVelocity()
+        let rbSpeed = hypot(velocity.x, velocity.y)
+        guard rbSpeed > 180 else { return false }
+
+        // Direction from RB to defender — we want the user's drag to be
+        // *opposite* of the defender to stiff-arm, or perpendicular to juke.
+        let toDef = CGPoint(x: defender.position.x - rb.position.x,
+                             y: defender.position.y - rb.position.y)
+        let toDefLen = max(0.01, hypot(toDef.x, toDef.y))
+        let toDefNorm = CGPoint(x: toDef.x / toDefLen, y: toDef.y / toDefLen)
+        let velNorm = CGPoint(x: velocity.x / rbSpeed, y: velocity.y / rbSpeed)
+        let dot = velNorm.x * toDefNorm.x + velNorm.y * toDefNorm.y
+
+        let rbStrength = homeRoster?.rbs.first?.strength ?? 70
+        let rbSpeedStat = homeRoster?.rbs.first?.speed ?? 70
+
+        let breakChance: Double
+        if dot < -0.2 {
+            // Stiff arm: moving opposite the defender. Strength-driven.
+            breakChance = min(0.40, max(0.0, 0.15 + Double(rbStrength - 70) * 0.006))
+        } else if abs(dot) < 0.5 {
+            // Juke: moving perpendicular. Speed-driven.
+            breakChance = min(0.40, max(0.0, 0.15 + Double(rbSpeedStat - 70) * 0.006))
+        } else {
+            // Running directly into the defender — no break.
+            return false
+        }
+
+        guard Double.random(in: 0..<1) < breakChance else { return false }
+
+        // Stun the defender for a moment and float a "BROKEN TACKLE" label.
+        defender.isStunned = true
+        defender.stunnedUntil = time + 0.6
+
+        let label = SKLabelNode(text: "BROKEN TACKLE!")
+        label.fontName = "Helvetica-Bold"
+        label.fontSize = 10
+        label.fontColor = .yellow
+        label.position = CGPoint(x: defender.position.x, y: defender.position.y + 16)
+        label.zPosition = 100
+        addChild(label)
+        label.run(SKAction.sequence([
+            SKAction.group([
+                SKAction.moveBy(x: 0, y: 18, duration: 0.5),
+                SKAction.fadeOut(withDuration: 0.5),
+            ]),
+            SKAction.removeFromParent(),
+        ]))
+        return true
     }
 
     // MARK: - Coverage
@@ -417,33 +509,18 @@ class GameplayScene: SKScene {
         guard let touch = touches.first, playActive else { return }
         let loc = touch.location(in: self)
 
-        // On pass plays, tapping anywhere near a receiver throws to them.
-        // Use a big hit radius (50pt) since sprites are tiny.
-        if gameState.phase == .livePlay {
-            // Pick the closest eligible receiver within range, not first match.
-            var closest: (role: Formation.SlotRole, sprite: PlayerSprite, dist: CGFloat)?
-            for (role, sprite) in offensePlayers {
-                guard sprite.isTapTarget else { continue }
-                let dx = loc.x - sprite.position.x
-                let dy = loc.y - sprite.position.y
-                let dist = sqrt(dx * dx + dy * dy)
-                if dist < 55 {
-                    if closest == nil || dist < closest!.dist {
-                        closest = (role, sprite, dist)
-                    }
-                }
-            }
-            if let c = closest {
-                throwTo(role: c.role, sprite: c.sprite)
+        if gameState.phase == .livePlay, let qb = qbSprite {
+            // Scramble mode: drag moves the QB anywhere; no throw is armed.
+            if gameState.scrambleMode {
+                isDraggingQB = true
                 return
             }
-            // Otherwise, start dragging QB.
-            if let qb = qbSprite {
-                let dx = loc.x - qb.position.x
-                let dy = loc.y - qb.position.y
-                if sqrt(dx * dx + dy * dy) < 55 {
-                    isDraggingQB = true
-                }
+            // Aim-and-release: touch near the QB arms a throw. On release,
+            // the ball flies to wherever the finger ended.
+            let dx = loc.x - qb.position.x
+            let dy = loc.y - qb.position.y
+            if sqrt(dx * dx + dy * dy) < 55 {
+                beginAiming(at: loc)
             }
         }
     }
@@ -451,6 +528,10 @@ class GameplayScene: SKScene {
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         let loc = touch.location(in: self)
+        if isAimingThrow {
+            updateAim(to: loc)
+            return
+        }
         if isDraggingQB, let qb = qbSprite {
             qb.position = loc
             ballSprite.position = loc
@@ -462,62 +543,184 @@ class GameplayScene: SKScene {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if isAimingThrow {
+            let landing = touches.first?.location(in: self) ?? (qbSprite?.position ?? .zero)
+            endAiming(throwingTo: landing)
+            return
+        }
         isDraggingQB = false
+    }
+
+    // MARK: - Aim-and-release
+
+    private func beginAiming(at point: CGPoint) {
+        guard qbSprite != nil else { return }
+        isAimingThrow = true
+
+        // Dashed arc line from QB to the current aim point.
+        let line = SKShapeNode()
+        line.strokeColor = SKColor.cyan.withAlphaComponent(0.75)
+        line.lineWidth = 2
+        line.zPosition = 50
+        aimArcLine = line
+        addChild(line)
+
+        // Ghost target ring where the ball would land.
+        let ring = SKShapeNode(circleOfRadius: 18)
+        ring.strokeColor = SKColor.cyan
+        ring.fillColor = .clear
+        ring.lineWidth = 2
+        ring.zPosition = 50
+        aimTargetRing = ring
+        addChild(ring)
+
+        updateAim(to: point)
+    }
+
+    private func updateAim(to point: CGPoint) {
+        guard isAimingThrow, let qb = qbSprite else { return }
+        let target = clampedAimPoint(from: qb.position, to: point)
+
+        // Rebuild the preview arc: same parabola the ball will actually fly.
+        let path = CGMutablePath()
+        path.move(to: qb.position)
+        let midY = (qb.position.y + target.y) / 2 + max(18, sqrt(hypot(target.x - qb.position.x, target.y - qb.position.y)) * 2.5)
+        path.addQuadCurve(to: target, control: CGPoint(x: (qb.position.x + target.x) / 2, y: midY))
+        aimArcLine?.path = path
+        aimTargetRing?.position = target
+    }
+
+    /// Keep the aim point on-field and forward of the QB (small buffer lets
+    /// short dump-offs still land just behind the LOS).
+    private func clampedAimPoint(from qb: CGPoint, to raw: CGPoint) -> CGPoint {
+        let maxX = FieldRenderer.centerX(sceneSize: size) + FieldRenderer.fieldWidth / 2 - 10
+        let minX = FieldRenderer.centerX(sceneSize: size) - FieldRenderer.fieldWidth / 2 + 10
+        let minY = qb.y - 40
+        return CGPoint(
+            x: min(maxX, max(minX, raw.x)),
+            y: max(minY, raw.y)
+        )
+    }
+
+    private func endAiming(throwingTo rawPoint: CGPoint) {
+        guard let qb = qbSprite else { return }
+        isAimingThrow = false
+        aimArcLine?.removeFromParent(); aimArcLine = nil
+        aimTargetRing?.removeFromParent(); aimTargetRing = nil
+
+        let landing = clampedAimPoint(from: qb.position, to: rawPoint)
+        throwToPoint(landing)
     }
 
     // MARK: - Throw
 
-    private func throwTo(role: Formation.SlotRole, sprite: PlayerSprite) {
-        guard playActive else { return }
+    /// Throw the ball to an aimed point on the field. Outcome is resolved
+    /// when the ball arrives, based on who's actually nearest the spot.
+    private func throwToPoint(_ landing: CGPoint) {
+        guard playActive, let qb = qbSprite else { return }
         playActive = false
         isDraggingQB = false
         gameState.receiverOptions = []
-        sprite.removeAction(forKey: "route")
+        isBallInFlight = true
 
-        let timing = sprite.isSweetSpotActive ? 0.0 : (routeStartTime > 1.5 ? 0.4 : 0.2)
-        sprite.isSweetSpotActive = false
+        // Stop all receiver routes — the ball is the only thing that matters
+        // from here until it arrives.
+        for sprite in offensePlayers.values {
+            sprite.removeAction(forKey: "route")
+        }
 
-        let routeDepth: CGFloat = {
-            guard let play = gameState.currentPlay, let route = play.routes[role] else { return 30 }
-            return route.waypoints.reduce(0) { $0 + abs($1.dy) }
-        }()
+        // Throw duration scales with distance so short throws snap fast and
+        // deep throws hang long enough for receivers to track them.
+        ballSprite.position = qb.position
+        let distance = hypot(landing.x - qb.position.x, landing.y - qb.position.y)
+        let duration = min(1.4, 0.3 + Double(distance) / 600.0)
 
-        // Real stats from rosters
-        let qbAwareness = homeRoster?.qb.awareness ?? 70
-        let wrSpeed: Int = {
-            guard let home = homeRoster else { return 70 }
-            switch role {
-            case .wr1: return home.wrs.first?.speed ?? 70
-            case .wr2: return home.wrs.count > 1 ? home.wrs[1].speed : 70
-            case .wr3: return home.wrs.count > 2 ? home.wrs[2].speed : 70
-            case .te:  return home.te.speed
-            case .rb, .rb2: return home.rbs.first?.speed ?? 70
-            default:   return 70
-            }
-        }()
-        let cbAwareness = awayRoster?.cbAwareness ?? 70
-
-        ballSprite.fly(to: sprite.position, duration: 0.4) { [weak self] in
+        ballSprite.fly(to: landing, duration: duration) { [weak self] in
             guard let self else { return }
-            let outcome = PlayOutcomeResolver.resolvePass(
-                timing: timing, qbAwareness: qbAwareness, wrSpeed: wrSpeed,
-                cbAwareness: cbAwareness, defense: self.gameState.currentDefense,
-                routeDepth: routeDepth
-            )
-            switch outcome {
-            case .complete(let yards):
-                self.resolvePlayResult(yards: yards,
-                                       text: "COMPLETE! +\(yards) yds",
-                                       isPositive: true)
-            case .incomplete:
-                self.resolvePlayResult(yards: 0, text: "INCOMPLETE",
-                                       isPositive: false,
-                                       wasIncomplete: true)
-            case .interception:
-                self.resolvePlayResult(yards: 0, text: "INTERCEPTED!",
-                                       isPositive: false, isTurnover: true)
-            default: break
+            self.isBallInFlight = false
+            self.resolveLandingSpot(landing)
+        }
+    }
+
+    /// Walk every player near the landing point and ask the resolver who wins
+    /// the catch. Feeds the result into the existing play-result pipeline.
+    private func resolveLandingSpot(_ landing: CGPoint) {
+        // Build the offense candidate list from live sprite positions —
+        // whoever broke off their route closest to the landing spot.
+        let offense: [PlayOutcomeResolver.CatchCandidate] = offensePlayers.compactMap { (role, sprite) in
+            // OL blockers aren't eligible receivers.
+            if role == .ol1 || role == .ol2 || role == .ol3 || role == .ol4 || role == .ol5 {
+                return nil
             }
+            return PlayOutcomeResolver.CatchCandidate(
+                pos: sprite.position,
+                speed: receiverSpeed(for: role),
+                awareness: homeRoster?.qb.awareness ?? 70,
+                overall: receiverOverall(for: role)
+            )
+        }
+
+        // Defense: every defender is a potential interceptor/deflector.
+        let defense: [PlayOutcomeResolver.CatchCandidate] = defensePlayers.enumerated().map { (idx, sprite) in
+            let awareness = idx >= 7 ? (awayRoster?.cbAwareness ?? 70) : 70
+            return PlayOutcomeResolver.CatchCandidate(
+                pos: sprite.position,
+                speed: 70,
+                awareness: awareness,
+                overall: awareness
+            )
+        }
+
+        let depthYards = Int((landing.y - (qbSprite?.position.y ?? landing.y)) / FieldRenderer.yardSpacing)
+
+        let outcome = PlayOutcomeResolver.resolveContestedCatch(
+            landing: landing,
+            offense: offense,
+            defense: defense,
+            routeDepthYards: max(0, depthYards),
+            defensePlay: gameState.currentDefense
+        )
+
+        switch outcome {
+        case .complete(let yards):
+            resolvePlayResult(yards: yards,
+                              text: "COMPLETE! +\(yards) yds",
+                              isPositive: true)
+        case .incomplete:
+            resolvePlayResult(yards: 0, text: "INCOMPLETE",
+                              isPositive: false, wasIncomplete: true)
+        case .interception:
+            resolvePlayResult(yards: 0, text: "INTERCEPTED!",
+                              isPositive: false, isTurnover: true)
+        default:
+            resolvePlayResult(yards: 0, text: "INCOMPLETE",
+                              isPositive: false, wasIncomplete: true)
+        }
+    }
+
+    private func receiverSpeed(for role: Formation.SlotRole) -> Int {
+        guard let home = homeRoster else { return 70 }
+        switch role {
+        case .wr1: return home.wrs.first?.speed ?? 70
+        case .wr2: return home.wrs.count > 1 ? home.wrs[1].speed : 70
+        case .wr3: return home.wrs.count > 2 ? home.wrs[2].speed : 70
+        case .te:  return home.te.speed
+        case .rb, .rb2: return home.rbs.first?.speed ?? 70
+        case .qb:  return home.qb.speed
+        default:   return 70
+        }
+    }
+
+    private func receiverOverall(for role: Formation.SlotRole) -> Int {
+        guard let home = homeRoster else { return 70 }
+        switch role {
+        case .wr1: return home.wrs.first?.overall ?? 70
+        case .wr2: return home.wrs.count > 1 ? home.wrs[1].overall : 70
+        case .wr3: return home.wrs.count > 2 ? home.wrs[2].overall : 70
+        case .te:  return home.te.overall
+        case .rb, .rb2: return home.rbs.first?.overall ?? 70
+        case .qb:  return home.qb.overall
+        default:   return 70
         }
     }
 

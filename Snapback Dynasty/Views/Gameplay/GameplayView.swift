@@ -133,27 +133,38 @@ struct GameplayView: View {
 
         case .livePlay:
             VStack {
-                Spacer()
-                HStack(spacing: 10) {
-                    ForEach(gameState.receiverOptions) { opt in
-                        Button {
-                            scene?.throwToRoleID(opt.id)
-                        } label: {
-                            VStack(spacing: 2) {
-                                Text("#\(opt.jersey)")
-                                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                                Text(opt.label)
-                                    .font(.system(size: 12, weight: .black))
-                            }
-                            .frame(width: 60, height: 48)
-                            .background(Color(hex: homeColor),
-                                        in: RoundedRectangle(cornerRadius: 8))
-                            .foregroundStyle(.white)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                HStack {
+                    Spacer()
+                    Text(gameState.scrambleMode ? "SCRAMBLE" : "DRAG QB TO AIM")
+                        .font(.system(size: 10, weight: .bold))
+                        .kerning(1)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(.black.opacity(0.55),
+                                    in: RoundedRectangle(cornerRadius: 4))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.top, 42).padding(.trailing, 12)
                 }
-                .padding(.bottom, 24)
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button {
+                        gameState.scrambleMode.toggle()
+                    } label: {
+                        Text(gameState.scrambleMode ? "AIM" : "SCRAMBLE")
+                            .font(.system(size: 13, weight: .black))
+                            .kerning(0.6)
+                            .padding(.horizontal, 18).padding(.vertical, 10)
+                            .background(
+                                gameState.scrambleMode
+                                    ? Color.white.opacity(0.2)
+                                    : Color(hex: homeColor),
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 20).padding(.bottom, 24)
+                }
             }
 
         case .playResult, .halftime:
