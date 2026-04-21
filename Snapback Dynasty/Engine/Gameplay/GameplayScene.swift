@@ -66,10 +66,10 @@ class GameplayScene: SKScene {
 
     private func setupCamera() {
         cameraNode = SKCameraNode()
-        // Zoom out so receivers running 15-25 yards downfield stay visible.
-        // Default viewport shows ~30 yards; 1.6× shows ~48 yards.
+        // Horizontal field: zoom out along X so ~38 yards are visible, but
+        // keep Y at 1.0 so the full sideline-to-sideline width fits on screen.
         cameraNode.xScale = 1.6
-        cameraNode.yScale = 1.6
+        cameraNode.yScale = 1.0
         addChild(cameraNode)
         camera = cameraNode
     }
@@ -83,18 +83,19 @@ class GameplayScene: SKScene {
     }
 
     func centerCamera(onYardLine yard: Int) {
-        let y = FieldRenderer.yPosition(forYard: yard, fieldHeight: FieldRenderer.fieldHeight, sceneSize: size)
-        cameraNode.run(SKAction.move(to: CGPoint(x: size.width / 2, y: y), duration: 0.3))
+        let x = FieldRenderer.xPosition(forYard: yard, sceneSize: size)
+        let cy = FieldRenderer.centerY(sceneSize: size)
+        cameraNode.run(SKAction.move(to: CGPoint(x: x, y: cy), duration: 0.3))
     }
 
     // MARK: - Formation setup
 
     func setupFormation(play: PlayDefinition, offenseColor: String, defenseColor: String) {
         clearPlayers()
-        let losY = FieldRenderer.yPosition(
-            forYard: gameState.ballYardLine,
-            fieldHeight: FieldRenderer.fieldHeight, sceneSize: size)
-        let cx = FieldRenderer.centerX(sceneSize: size)
+        // Horizontal field: upfield is +X. `slot.y` (semantically: upfield
+        // offset) maps to screen X; `slot.x` (lateral offset) maps to screen Y.
+        let losX = FieldRenderer.xPosition(forYard: gameState.ballYardLine, sceneSize: size)
+        let cy = FieldRenderer.centerY(sceneSize: size)
 
         // Offense jersey = primary color (home), pants = darkened
         let offensePants = darkenHex(homeColor, by: 0.4)
@@ -110,7 +111,7 @@ class GameplayScene: SKScene {
                 jerseyColor: offenseColor, pantsColor: offensePants,
                 isOffense: true, isQB: isQB
             )
-            sprite.position = CGPoint(x: cx + slot.x, y: losY + slot.y)
+            sprite.position = CGPoint(x: losX + slot.y, y: cy + slot.x)
             sprite.isTapTarget = play.routes[slot.role] != nil && !isQB && slot.role != .rb2
             addChild(sprite)
             offensePlayers[slot.role] = sprite
@@ -118,7 +119,8 @@ class GameplayScene: SKScene {
             if slot.role == .rb || slot.role == .rb2 { rbSprite = sprite }
         }
 
-        // Defense — 4-3 positions, wearing away jersey
+        // Defense — 4-3 positions. Tuple is (lateral offset, upfield offset)
+        // in the same convention as formation slots.
         let defPositions: [(CGFloat, CGFloat)] = [
             (-36, 14), (-12, 14), (12, 14), (36, 14),
             (-40, 38), (0, 38), (40, 38),
@@ -131,12 +133,12 @@ class GameplayScene: SKScene {
                 jerseyColor: awayJersey, pantsColor: defensePants,
                 isOffense: false
             )
-            sprite.position = CGPoint(x: cx + pos.0, y: losY + pos.1)
+            sprite.position = CGPoint(x: losX + pos.1, y: cy + pos.0)
             addChild(sprite)
             defensePlayers.append(sprite)
         }
 
-        ballSprite.position = qbSprite?.position ?? CGPoint(x: cx, y: losY)
+        ballSprite.position = qbSprite?.position ?? CGPoint(x: losX, y: cy)
         ballSprite.isHidden = false
         centerCamera(onYardLine: gameState.ballYardLine)
 
@@ -224,11 +226,11 @@ class GameplayScene: SKScene {
     private func animateRoutes(play: PlayDefinition) {
         for (role, route) in play.routes {
             guard let sprite = offensePlayers[role], route.name != "Block" else { continue }
-            // moveBy = relative displacement, so multi-waypoint routes chain
-            // naturally instead of snapping back to initial slot each leg.
+            // Horizontal field: waypoint dy (upfield) → screen X, dx (lateral)
+            // → screen Y. moveBy chains multi-waypoint routes naturally.
             var actions: [SKAction] = []
             for wp in route.waypoints {
-                let action = SKAction.moveBy(x: wp.dx, y: wp.dy, duration: wp.duration)
+                let action = SKAction.moveBy(x: wp.dy, y: wp.dx, duration: wp.duration)
                 action.timingMode = .easeOut
                 actions.append(action)
             }
@@ -267,20 +269,21 @@ class GameplayScene: SKScene {
             ballSprite.position = qbSprite?.position ?? ballSprite.position
         }
 
-        // Camera follows the most relevant actor:
+        // Camera follows the most relevant actor along the field's length (X):
         //   ball in flight → ball (so user tracks the catch)
         //   running play  → RB
         //   otherwise     → QB
-        let followY: CGFloat? = {
-            if isBallInFlight { return ballSprite.position.y }
-            if isDraggingRB, let rb = rbSprite { return rb.position.y }
-            if let qb = qbSprite { return qb.position.y }
+        // Y stays locked to the field's vertical center.
+        let followX: CGFloat? = {
+            if isBallInFlight { return ballSprite.position.x }
+            if isDraggingRB, let rb = rbSprite { return rb.position.x }
+            if let qb = qbSprite { return qb.position.x }
             return nil
         }()
-        if let targetY = followY {
-            let currentY = cameraNode.position.y
-            let smoothed = currentY + (targetY - currentY) * 0.18
-            cameraNode.position = CGPoint(x: size.width / 2, y: smoothed)
+        if let targetX = followX {
+            let currentX = cameraNode.position.x
+            let smoothed = currentX + (targetX - currentX) * 0.18
+            cameraNode.position = CGPoint(x: smoothed, y: FieldRenderer.centerY(sceneSize: size))
         }
 
         // Pressure: only on pass plays
@@ -331,10 +334,9 @@ class GameplayScene: SKScene {
                     tackled = true
                     isDraggingRB = false
                     playActive = false
-                    let losY = FieldRenderer.yPosition(
-                        forYard: gameState.ballYardLine,
-                        fieldHeight: FieldRenderer.fieldHeight, sceneSize: size)
-                    let yardsGained = Int((rb.position.y - losY) / FieldRenderer.yardSpacing)
+                    let losX = FieldRenderer.xPosition(
+                        forYard: gameState.ballYardLine, sceneSize: size)
+                    let yardsGained = Int((rb.position.x - losX) / FieldRenderer.yardSpacing)
                     resolvePlayResult(yards: yardsGained,
                                      text: yardsGained >= 0 ? "TACKLE! +\(yardsGained) yds" : "LOSS! \(yardsGained) yds",
                                      isPositive: yardsGained >= 0)
@@ -454,11 +456,13 @@ class GameplayScene: SKScene {
             let def = defensePlayers[defIdx]
 
             // Safeties (9, 10) shade deeper; LBs/CBs trail tight.
+            // Horizontal field: defenders sit downfield of receivers
+            // (higher X), which is the defensive side of the coverage point.
             let isSafety = defIdx >= 9
             let isLinebacker = defIdx >= 4 && defIdx <= 6
-            let trailY: CGFloat = isSafety ? 34 : 6
-            let target = CGPoint(x: receiver.position.x,
-                                  y: receiver.position.y + trailY)
+            let trailX: CGFloat = isSafety ? 34 : 6
+            let target = CGPoint(x: receiver.position.x + trailX,
+                                  y: receiver.position.y)
 
             let dx = target.x - def.position.x
             let dy = target.y - def.position.y
@@ -590,15 +594,17 @@ class GameplayScene: SKScene {
         aimTargetRing?.position = target
     }
 
-    /// Keep the aim point on-field and forward of the QB (small buffer lets
-    /// short dump-offs still land just behind the LOS).
+    /// Keep the aim point on-field and forward of the QB. Horizontal field:
+    /// lateral = screen Y (clamped inside sidelines), upfield = screen X
+    /// (can't throw more than 40pt behind the QB).
     private func clampedAimPoint(from qb: CGPoint, to raw: CGPoint) -> CGPoint {
-        let maxX = FieldRenderer.centerX(sceneSize: size) + FieldRenderer.fieldWidth / 2 - 10
-        let minX = FieldRenderer.centerX(sceneSize: size) - FieldRenderer.fieldWidth / 2 + 10
-        let minY = qb.y - 40
+        let cy = FieldRenderer.centerY(sceneSize: size)
+        let maxY = cy + FieldRenderer.fieldWidth / 2 - 10
+        let minY = cy - FieldRenderer.fieldWidth / 2 + 10
+        let minX = qb.x - 40
         return CGPoint(
-            x: min(maxX, max(minX, raw.x)),
-            y: max(minY, raw.y)
+            x: max(minX, raw.x),
+            y: min(maxY, max(minY, raw.y))
         )
     }
 
@@ -671,7 +677,7 @@ class GameplayScene: SKScene {
             )
         }
 
-        let depthYards = Int((landing.y - (qbSprite?.position.y ?? landing.y)) / FieldRenderer.yardSpacing)
+        let depthYards = Int((landing.x - (qbSprite?.position.x ?? landing.x)) / FieldRenderer.yardSpacing)
 
         let outcome = PlayOutcomeResolver.resolveContestedCatch(
             landing: landing,

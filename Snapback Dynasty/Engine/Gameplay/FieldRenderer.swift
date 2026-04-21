@@ -1,16 +1,20 @@
 import SpriteKit
 
-/// Retro Bowl–style field.
-/// Vertical orientation, bright kelly-green grass, bold yard lines,
-/// team-colored end zones with names, team logo at midfield (async loaded).
+/// Retro Bowl–style field, horizontal orientation:
+///   - Length runs along screen X (offense drives left → right).
+///   - Width runs along screen Y.
+/// Bright kelly-green grass, bold yard lines, team-colored end zones with
+/// names, team logo at midfield (async loaded).
 enum FieldRenderer {
 
     // MARK: - Constants
 
     static let endZoneDepth: CGFloat = 70
     static let yardsOnField: Int = 100
-    static let yardSpacing: CGFloat = 13     // pts per yard
-    static let fieldHeight: CGFloat = CGFloat(yardsOnField) * yardSpacing + endZoneDepth * 2
+    static let yardSpacing: CGFloat = 13     // pts per yard (along X)
+    /// Full length along screen X, including both endzones.
+    static let fieldLength: CGFloat = CGFloat(yardsOnField) * yardSpacing + endZoneDepth * 2
+    /// Field height along screen Y (sideline-to-sideline thickness).
     static let fieldWidth: CGFloat = 360
 
     /// Kelly-green Retro Bowl grass color.
@@ -24,69 +28,76 @@ enum FieldRenderer {
                       homeLogoURL: String? = nil) -> SKNode {
         let root = SKNode()
         root.name = "field"
-        let xOffset = (sceneSize.width - fieldWidth) / 2
+        // Center the field vertically in the scene.
+        let yOffset = (sceneSize.height - fieldWidth) / 2
 
-        // Grass base with alternating "mowed" stripes for texture.
+        // Grass base — alternating "mowed" stripes, each one yard wide,
+        // running vertically across the field.
         for yard in 0..<yardsOnField {
-            let y = endZoneDepth + CGFloat(yard) * yardSpacing
+            let x = endZoneDepth + CGFloat(yard) * yardSpacing
             let stripeColor = yard % 10 < 5 ? grassColor : grassStripeColor
-            let stripe = SKShapeNode(rect: CGRect(x: xOffset, y: y,
-                                                   width: fieldWidth, height: yardSpacing))
+            let stripe = SKShapeNode(rect: CGRect(x: x, y: yOffset,
+                                                   width: yardSpacing, height: fieldWidth))
             stripe.fillColor = stripeColor
             stripe.strokeColor = .clear
             root.addChild(stripe)
         }
 
-        // White sidelines
-        let sidelineLeft = SKShapeNode(rect: CGRect(x: xOffset - 2, y: endZoneDepth,
-                                                     width: 3,
-                                                     height: CGFloat(yardsOnField) * yardSpacing))
-        sidelineLeft.fillColor = .white
-        sidelineLeft.strokeColor = .clear
-        root.addChild(sidelineLeft)
-        let sidelineRight = SKShapeNode(rect: CGRect(x: xOffset + fieldWidth - 1,
-                                                      y: endZoneDepth, width: 3,
-                                                      height: CGFloat(yardsOnField) * yardSpacing))
-        sidelineRight.fillColor = .white
-        sidelineRight.strokeColor = .clear
-        root.addChild(sidelineRight)
+        // Sidelines — horizontal lines along top and bottom of field.
+        let playFieldLength = CGFloat(yardsOnField) * yardSpacing
+        let sidelineBottom = SKShapeNode(rect: CGRect(
+            x: endZoneDepth, y: yOffset - 2,
+            width: playFieldLength, height: 3))
+        sidelineBottom.fillColor = .white
+        sidelineBottom.strokeColor = .clear
+        root.addChild(sidelineBottom)
 
-        // Yard lines every 5 (thin) and every 10 (thick with numbers)
+        let sidelineTop = SKShapeNode(rect: CGRect(
+            x: endZoneDepth, y: yOffset + fieldWidth - 1,
+            width: playFieldLength, height: 3))
+        sidelineTop.fillColor = .white
+        sidelineTop.strokeColor = .clear
+        root.addChild(sidelineTop)
+
+        // Yard lines every 5 (thin) and every 10 (thick with numbers).
         for yard in stride(from: 5, through: 95, by: 5) {
-            let y = endZoneDepth + CGFloat(yard) * yardSpacing
+            let x = endZoneDepth + CGFloat(yard) * yardSpacing
             let isTen = yard % 10 == 0
-            let line = SKShapeNode(rect: CGRect(x: xOffset,
-                                                 y: y - (isTen ? 1.5 : 0.75),
-                                                 width: fieldWidth,
-                                                 height: isTen ? 3 : 1.5))
+            let line = SKShapeNode(rect: CGRect(
+                x: x - (isTen ? 1.5 : 0.75), y: yOffset,
+                width: isTen ? 3 : 1.5, height: fieldWidth))
             line.fillColor = .white
             line.strokeColor = .clear
             root.addChild(line)
 
             if isTen {
                 let displayYard = yard <= 50 ? yard : 100 - yard
+                // Top sideline
                 addYardNumber(to: root, yard: displayYard,
-                              x: xOffset + 22, y: y + 4, rotate: false)
+                              x: x, y: yOffset + fieldWidth - 18)
+                // Bottom sideline
                 addYardNumber(to: root, yard: displayYard,
-                              x: xOffset + fieldWidth - 22, y: y + 4, rotate: false)
+                              x: x, y: yOffset + 18)
             }
         }
 
-        // Hash marks every yard
+        // Hash marks: short horizontal ticks along both inside hash rows.
         for yard in 1..<100 where yard % 10 != 0 && yard % 5 != 0 {
-            let y = endZoneDepth + CGFloat(yard) * yardSpacing
-            for hashX in [xOffset + fieldWidth * 0.33, xOffset + fieldWidth * 0.67] {
-                let hash = SKShapeNode(rect: CGRect(x: hashX - 1, y: y - 0.5,
-                                                     width: 4, height: 1))
+            let x = endZoneDepth + CGFloat(yard) * yardSpacing
+            for hashY in [yOffset + fieldWidth * 0.33, yOffset + fieldWidth * 0.67] {
+                let hash = SKShapeNode(rect: CGRect(
+                    x: x - 0.5, y: hashY - 2,
+                    width: 1, height: 4))
                 hash.fillColor = .white
                 hash.strokeColor = .clear
                 root.addChild(hash)
             }
         }
 
-        // End zones (team-colored)
-        let awayEZ = SKShapeNode(rect: CGRect(x: xOffset, y: 0,
-                                               width: fieldWidth, height: endZoneDepth))
+        // End zones — away on the left, home on the right.
+        let awayEZ = SKShapeNode(rect: CGRect(
+            x: 0, y: yOffset,
+            width: endZoneDepth, height: fieldWidth))
         awayEZ.fillColor = skColor(hex: awayColor)
         awayEZ.strokeColor = .white
         awayEZ.lineWidth = 2
@@ -94,15 +105,20 @@ enum FieldRenderer {
 
         let awayLabel = SKLabelNode(text: awayName.uppercased())
         awayLabel.fontName = "Helvetica-Bold"
-        awayLabel.fontSize = 26
+        awayLabel.fontSize = 22
         awayLabel.fontColor = textColor(for: awayColor)
-        awayLabel.position = CGPoint(x: sceneSize.width / 2, y: endZoneDepth / 2 - 9)
+        awayLabel.position = CGPoint(x: endZoneDepth / 2, y: yOffset + fieldWidth / 2)
+        awayLabel.verticalAlignmentMode = .center
+        awayLabel.horizontalAlignmentMode = .center
+        // Rotate so the team name reads along the endzone's long axis.
+        awayLabel.zRotation = .pi / 2
         awayLabel.zPosition = 1
         root.addChild(awayLabel)
 
-        let homeY = endZoneDepth + CGFloat(yardsOnField) * yardSpacing
-        let homeEZ = SKShapeNode(rect: CGRect(x: xOffset, y: homeY,
-                                               width: fieldWidth, height: endZoneDepth))
+        let homeX = endZoneDepth + playFieldLength
+        let homeEZ = SKShapeNode(rect: CGRect(
+            x: homeX, y: yOffset,
+            width: endZoneDepth, height: fieldWidth))
         homeEZ.fillColor = skColor(hex: homeColor)
         homeEZ.strokeColor = .white
         homeEZ.lineWidth = 2
@@ -110,20 +126,23 @@ enum FieldRenderer {
 
         let homeLabel = SKLabelNode(text: homeName.uppercased())
         homeLabel.fontName = "Helvetica-Bold"
-        homeLabel.fontSize = 26
+        homeLabel.fontSize = 22
         homeLabel.fontColor = textColor(for: homeColor)
-        homeLabel.position = CGPoint(x: sceneSize.width / 2, y: homeY + endZoneDepth / 2 - 9)
+        homeLabel.position = CGPoint(x: homeX + endZoneDepth / 2, y: yOffset + fieldWidth / 2)
+        homeLabel.verticalAlignmentMode = .center
+        homeLabel.horizontalAlignmentMode = .center
+        homeLabel.zRotation = -.pi / 2
         homeLabel.zPosition = 1
         root.addChild(homeLabel)
 
-        // Midfield logo — circle with team color background + abbreviation.
-        // If a URL is provided, swap in the image asynchronously.
-        let midY = endZoneDepth + 50 * yardSpacing
+        // Midfield logo.
+        let midX = endZoneDepth + 50 * yardSpacing
+        let midY = yOffset + fieldWidth / 2
         let circle = SKShapeNode(circleOfRadius: 36)
         circle.fillColor = skColor(hex: homeColor).withAlphaComponent(0.35)
         circle.strokeColor = .white
         circle.lineWidth = 2
-        circle.position = CGPoint(x: sceneSize.width / 2, y: midY)
+        circle.position = CGPoint(x: midX, y: midY)
         circle.name = "midfield_logo"
         root.addChild(circle)
 
@@ -131,12 +150,12 @@ enum FieldRenderer {
         logoInitials.fontName = "Helvetica-Bold"
         logoInitials.fontSize = 20
         logoInitials.fontColor = .white
-        logoInitials.position = CGPoint(x: sceneSize.width / 2, y: midY - 6)
+        logoInitials.position = CGPoint(x: midX, y: midY - 6)
         logoInitials.zPosition = 2
         logoInitials.name = "midfield_text"
         root.addChild(logoInitials)
 
-        // Load logo image async if URL provided
+        // Async-load the real logo if a URL was provided.
         if let urlString = homeLogoURL, let url = URL(string: urlString) {
             Task {
                 if let image = await LogoCache.shared.load(url: url),
@@ -145,7 +164,7 @@ enum FieldRenderer {
                         let texture = SKTexture(cgImage: cgImage)
                         let sprite = SKSpriteNode(texture: texture)
                         sprite.size = CGSize(width: 60, height: 60)
-                        sprite.position = CGPoint(x: sceneSize.width / 2, y: midY)
+                        sprite.position = CGPoint(x: midX, y: midY)
                         sprite.zPosition = 2
                         sprite.alpha = 0.95
                         root.addChild(sprite)
@@ -159,25 +178,29 @@ enum FieldRenderer {
     }
 
     private static func addYardNumber(to root: SKNode, yard: Int,
-                                       x: CGFloat, y: CGFloat, rotate: Bool) {
+                                       x: CGFloat, y: CGFloat) {
         let label = SKLabelNode(text: "\(yard)")
         label.fontName = "Helvetica-Bold"
-        label.fontSize = 22
+        label.fontSize = 16
         label.fontColor = .white
         label.position = CGPoint(x: x, y: y)
+        label.verticalAlignmentMode = .center
+        label.horizontalAlignmentMode = .center
         label.zPosition = 1
-        if rotate { label.zRotation = .pi / 2 }
         root.addChild(label)
     }
 
     // MARK: - Coordinate helpers
 
-    static func yPosition(forYard yard: Int, fieldHeight: CGFloat, sceneSize: CGSize) -> CGFloat {
+    /// Screen X coordinate of the given yard line (0 = away endzone far edge,
+    /// 100 = home endzone far edge; 25 = own 25, 75 = opponent's 25).
+    static func xPosition(forYard yard: Int, sceneSize: CGSize) -> CGFloat {
         endZoneDepth + CGFloat(yard) * yardSpacing
     }
 
-    static func centerX(sceneSize: CGSize) -> CGFloat {
-        sceneSize.width / 2
+    /// Screen Y of the sideline-to-sideline center line.
+    static func centerY(sceneSize: CGSize) -> CGFloat {
+        sceneSize.height / 2
     }
 
     // MARK: - Color helpers

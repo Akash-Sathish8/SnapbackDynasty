@@ -68,7 +68,9 @@ class SeasonManager {
         }
 
         // Build a unified Set of all paired matchups (sorted names) for O(1) duplicate checks.
-        var scheduledPairs: Set<String> = pairedSet  // pairedSet already has all conf pairings
+        // Derive from allGames directly — both round-robin and partial branches
+        // already wrote their matchups there.
+        var scheduledPairs: Set<String> = []
         for (h, a, _) in allGames {
             scheduledPairs.insert([h.name, a.name].sorted().joined(separator: "|"))
         }
